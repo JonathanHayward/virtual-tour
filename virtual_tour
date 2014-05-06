@@ -1,0 +1,3902 @@
+#!FULL_PYTHON_PATH
+
+#
+# Virtual Tour is copyright 2003 by Jonathan Hayward, comes with NO
+# WARRANTY, is released under the Artistic License, and has home page at
+# http://JonathansCorner.com/etc/furball/ . See the file README for details.
+#
+
+"""Virtual Tour allows an administrator to link pictures of place so that
+visitors have freedom of motion within a virtual environment."""
+
+import cgi, ConfigParser, cPickle, os, random, re, string, sys, time
+
+import cgitb; cgitb.enable()
+
+CAN_SEQUENCE_OVER_DICTIONARIES = 1
+THREADING_LEVEL = 0
+
+# Classes.
+
+class ancestor:
+    """The ancestor to all other classes defined here. Treat as abstract."""
+    def __init__(self):
+        self.identifier = self.get_next_identifier()
+    def get_identifier(self):
+        return self.identifier
+    def get_next_identifier(self):
+        """Get an identifier that has not been used before."""
+        global immutable_master
+        if immutable_master != None:
+            immutable_master.highest_identifier += 1
+            return str(immutable_master.highest_identifier)
+        else:
+            return "0"
+
+class body(ancestor):
+    """Something that can be found in a view. Players, the furball, and
+      eventually discoverable items are/will be creatures."""
+    def __init__(self):
+        ancestor.__init__(self)
+        self.view_wrapper = None
+
+
+class compass(ancestor):
+    def __init__(self):
+        ancestor.__init__(self)
+    def display(self, alignment="right"):
+        view = configuration.get_view(get_current_view())
+        build_output("<table border=\"0\" cellpadding=\"0\" " + \
+          "cellspacing=\"0\" align=\"" + alignment + \
+          "\" style=\"margin-left: 20px\">")
+        build_output("<tr><td colspan=\"3\" height=\"20\"></td></tr>")
+        build_output("<tr>")
+        build_output("<td><img src=\"" + \
+          configuration.convert_to_url("placeholder.gif") + \
+          "\" alt=\"\"></td>")
+        if view.has_neighbor("Forward"):
+            build_output("<td><input type=\"image\" name=\"Forward\" " + \
+              "value=\"Forward\" src=\"" + \
+              configuration.convert_to_url("arrow_up.gif") + \
+              "\" alt=\"Forward\"></td>")
+        else:
+            build_output("<td><input type=\"image\" name=\"Forward\" " + \
+              "value=\"Forward\" src=\"" + \
+              configuration.convert_to_url("invalid_arrow_up.gif") + \
+              "\" alt=\"Forward\"></td>")
+            #build_output("<td><img src=\"" + \
+              #configuration.convert_to_url("placeholder.gif") + \
+              #"\" alt=\"\"></td>")
+        build_output("<td><img src=\"" + \
+          configuration.convert_to_url("placeholder.gif") + \
+          "\" alt=\"\"></td>")
+        build_output("</tr>")
+        build_output("<tr>")
+        if view.has_neighbor("Left"):
+            build_output("<td><input type=\"image\" name=\"Left\" " + \
+              "value=\"Left\" src=\"" + \
+              configuration.convert_to_url("arrow_left.gif") + \
+              "\" alt=\"Left\"></td>")
+        else:
+            build_output("<td><input type=\"image\" name=\"Left\" " + \
+              "value=\"Left\" src=\"" + \
+              configuration.convert_to_url("invalid_arrow_left.gif") + \
+              "\" alt=\"Left\"></td>")
+            #build_output("<td><img src=\"" + \
+              #configuration.convert_to_url("placeholder.gif") + \
+              #"\" alt=\"" + view.get_title() + "\"></td>")
+        filename = "center_arrow_up.gif"
+        if view.get_view_type() == "coordinate":
+            if view.parse_name()[4] == "E":
+                filename = "center_arrow_right.gif"
+            if view.parse_name()[4] == "S":
+                filename = "center_arrow_down.gif"
+            if view.parse_name()[4] == "W":
+                filename = "center_arrow_left.gif"
+        if view.get_view_type() == "passage":
+            if view.parse_name()[3] == "B":
+                filename = "center_arrow_down.gif"
+        build_output("<td><input type=\"image\" name=\"Stay\" " + \
+          "value=\"Stay\" src=\"" + \
+          configuration.convert_to_url(filename) + \
+          "\" alt=\"Stay\"></td>")
+        if view.has_neighbor("Right"):
+            build_output("<td><input type=\"image\" name=\"Right\" " + \
+              "value=\"Right\" src=\"" + \
+              configuration.convert_to_url("arrow_right.gif") + \
+              "\" alt=\"Right\"></td>")
+        else:
+            build_output("<td><input type=\"image\" name=\"Right\" " + \
+              "value=\"Right\" src=\"" + \
+              configuration.convert_to_url("invalid_arrow_right.gif") + \
+              "\" alt=\"Right\"></td>")
+            #build_output("<td><img src=\"" + \
+              #configuration.convert_to_url("placeholder.gif") + \
+              #"\" alt=\"\"></td>")
+        build_output("</tr>")
+        build_output("<tr>")
+        build_output("<td><img src=\"" + \
+          configuration.convert_to_url("placeholder.gif") + \
+          "\" alt=\"\"></td>")
+        if view.has_neighbor("Back"):
+            build_output("<td><input type=\"image\" name=\"Back\" " + \
+              "value=\"Back\" src=\"" + \
+              configuration.convert_to_url("arrow_down.gif") + \
+              "\" alt=\"Back\"></td>")
+        else:
+            build_output("<td><input type=\"image\" name=\"Back\" " + \
+              "value=\"Back\" src=\"" + \
+              configuration.convert_to_url("invalid_arrow_down.gif") + \
+              "\" alt=\"Back\"></td>")
+            #build_output("<td><img src=\"" + \
+              #configuration.convert_to_url("placeholder.gif") + \
+              #"\" alt=\"\"></td>")
+        build_output("<td><img src=\"" + \
+          configuration.convert_to_url("placeholder.gif") + \
+          "\" alt=\"\"></td>")
+        build_output("</tr>")
+        build_output("</table>")
+
+class configuration_class(ancestor):
+    """The class which answers all configuration questions. This should be
+    replaced with a cPickle structure."""
+    def __init__(self):
+        ancestor.__init__(self)
+        self.body_tag = "<body bgcolor=\"#ffffff\" link=\"\#7080e0\" vlink=\"9850a0\" alink=\"#c09090\" text=\"#303030\">"
+        self.frames = {}
+    def convert_to_url(self, filename):
+        return "DOCUMENT_URL" + filename
+    def get_action_method(self):
+        #
+        # WARNING: This is set to "get" as part of a workaround for a bug that
+        # prevented searches from working with the "post" method. Check that
+        # you can effectively search via "post" before leaving this on post.
+        #
+        return "get"
+    def get_action_url(self):
+        return "ACTION_URL"
+    def get_administrative_text_height(self):
+        return 7
+    def get_administrative_text_width(self):
+        return 95
+    def get_approximate_match_style(self, color = "#404040", should_color = 1):
+        if should_color:
+            return "font-weight: bold; color: " + color
+        else:
+            return "font-weight: bold"
+    def get_approximate_match_threshold(self):
+        if hasattr(self, "approximate_match_threshold"):
+            return self.approximate_match_threshold
+        else:
+            return 0.5
+    def get_body_tag(self):
+        return self.body_tag
+    def get_border_width(self):
+        return 4
+    def get_cache_duration(self):
+        return 0
+        if hasattr(self, "cache_duration"):
+            return self.cache_duration
+        else:
+            return 3600
+    def get_cell_padding(self):
+        return 3
+    def get_control_link_style(self):
+        return "text-decoration: none; font-weight: bold"
+    def get_control_popup_height(self):
+        return 600
+    def get_control_popup_width(self):
+        return 800
+    def get_debug_level(self):
+        return 5
+    def get_default_format(self):
+        return "mixed"
+    def get_default_style(self, color = "#808080", should_color = 1):
+        if should_color:
+            return "color: " + color
+        else:
+            return ""
+    def get_default_text(self):
+        return read_file("default_text")
+    def get_delay_between_monolith_saves(self):
+        return  3600
+        #return 1
+    def get_displayable_frames_list(self):
+        result = []
+        for current_frame in sequence(self.get_frames_list()):
+            if self.should_display_frame(current_frame):
+                result.append(current_frame)
+        return result
+    def get_entry_footer_marker(self):
+        return "<!-- Footer -->"
+    def get_entry_footer_link(self, identifier = "new_entry"):
+        return "<p align=\"center\"><a style=\"" + \
+          self.get_control_link_style() + "\" href=\"" + \
+          factory.get_frame_edit_entry().get_url() + \
+          "&entry_identifier=" + identifier + "\">Edit " + \
+          "Entry</a></p>\n" + \
+          "<p align=\"center\"><a style=\"" + \
+          self.get_control_link_style() + "\" href=\"" + \
+          factory.get_frame_edit_entry().get_url() + \
+          "&entry_identifier=new_entry\">Add " + \
+          "Entry</a></p>\n"
+    def get_entry_text_fields(self):
+        return ["Title", "Text", "PermanentID", "Version"]
+    def get_error_reporting_level(self):
+        return 2
+    def get_exact_match_style(self, color = "#000000", should_color = 1):
+        if should_color:
+            return "font-size: larger; font-weight: bold; color: " + color
+        else:
+            return "font-size: larger; font-weight: bold"
+    def get_exact_match_threshold(self):
+        if hasattr(self, "approximate_match_threshold"):
+            return self.exact_match_threshold
+        else:
+            return 1.0
+    def get_excerpt_pixels_per_word(self):
+        return 91
+    def get_excerpt_radius(self):
+        if hasattr(self, "excerpt_radius"):
+            return self.excerpt_radius
+        else:
+            return 4
+    def get_first_view(self):
+        if hasattr(self, "first_view"):
+            return self.first_view
+        elif hasattr(self, "views") and self.views != {}:
+            return self.views.values()[0].get_identifier()
+        else:
+            return ""
+    def get_frame_title(self, frame_name):
+        if frame_name == "control":
+            unprocessed_result = self.get_title() + ": Control Panel"
+        elif frame_name == "edit_entry":
+            if get_cgi("entry_identifier", "new_entry") == "new_entry":
+                unprocessed_result = self.get_title() + ": Add New Entry"
+            else:
+                unprocessed_result = self.get_title() + ": Edit Entry"
+        elif frame_name == "master":
+            unprocessed_result = \
+              self.get_title()
+        elif frame_name == "process_edit_entry":
+            unprocessed_result = get_cgi("field_Title", self.get_title() + \
+              ": Data Entered")
+        elif frame_name == "search":
+            unprocessed_result = self.get_title() + ": Search"
+        elif frame_name == "search_result":
+            unprocessed_result = self.get_title() + ": Results"
+        elif frame_name == "search_result_from_html":
+            unprocessed_result = self.get_title() + ": Results"
+        else:
+            unprocessed_result = frame_name
+        return unprocessed_result
+    def get_frame_width(self, frame_name):
+        return "*"
+    def get_frames_list(self):
+        return ("administrative_control", "edit_entry", "master", \
+          "process_edit_entry", "search", "search_result", "user_control");
+    def get_histogram_weights(self):
+        return [4, 2, 1]
+    def get_image_extension(self):
+        if hasattr(self, "image_extension"):
+            return self.image_extension
+        else:
+            return "jpg"
+    def get_image_height(self):
+        if hasattr(self, "image_height"):
+            return self.image_height
+        else:
+            return 480
+    def get_image_width(self):
+        if hasattr(self, "image_width"):
+            return self.image_width
+        else:
+            return 640
+    def get_internal_window_displayable_frames_list(self):
+        result = []
+        for current_frame in sequence(self.get_displayable_frames_list()):
+            if current_frame == "search" or current_frame == "search_result":
+                result.append(current_frame)
+        return result
+    def get_invisible_fields(self):
+        return ["PermanentID", "Version"]
+    def get_matches_per_page(self):
+        if hasattr(self, "matches_per_page"):
+            return self.matches_per_page
+        else:
+            return 10
+    def get_maximum_quotes(self):
+        return 10
+        if hasattr(self, "should_limit_quotes") and self.should_limit_quotes:
+            if hasattr(self, "maximum_quotes"):
+                return self.maximum_quotes
+            else:
+                return 10
+        else:
+            return -1
+        #if factory.get_search_criteria()[2]:
+            #return -1
+        #else:
+            #return 10
+    def get_navigation(self):
+        if not hasattr(self, "navigation"):
+            self.navigation = factory.get_navigation()
+        return self.navigation
+    def get_normalizing_lower_bound(self):
+        if hasattr(self, "normalizing_lower_bound"):
+            return self.normalizing_lower_bound
+        else:
+            return 0.06
+    def get_normalizing_power(self):
+        if hasattr(self, "normalizing_power"):
+            return self.normalizing_power
+        else:
+            return 0.1
+    def get_normalizing_upper_bound(self):
+        if hasattr(self, "normalizing_upper_bound"):
+            return self.normalizing_upper_bound
+        else:
+            return 0.4
+    def get_number_of_spaces(self):
+        return 5
+    def get_page_footer(self):
+        if hasattr(self, "page_footer"):
+            return self.page_footer
+        else:
+            return read_file("page_footer")
+    def get_page_header(self):
+        if hasattr(self, "page_header"):
+            return self.page_header
+        else:
+            return read_file("page_header")
+    def get_program_mode(self):
+        #return "oracle"
+        #return "fast_cgi"
+        return "standalone"
+    def get_program_name(self):
+        return "virtual_tour"
+    def get_query_terminator(self):
+        return "@@END_OF_QUERY@@"
+    def get_quote_link_style_modifier(self):
+        return "font-size: smaller"
+    def get_result_link_style(self):
+        return "text-decoration: none; font-weight: bold; font-size: larger"
+    def get_url_prefix(self):
+        return "DOCUMENT_URL"
+    def get_url_suffix(self):
+        if hasattr(self, "image_extension"):
+            if self.image_extension[0] == ".":
+                return self.image_extension
+            else:
+                return "." + self.image_extension
+        else:
+            return ".jpg"
+    def get_view(self, identifier):
+        if identifier in self.get_views():
+            return self.get_views()[identifier]
+        else:
+            return None
+    def get_views(self):
+        if not hasattr(self, "views"):
+            self.views = {}
+        return self.views
+    def get_sacrifice_memory_for_speed_level(self):
+        #if hasattr(self, "sacrifice_memory_for_speed_level"):
+            #return self.sacrifice_memory_for_speed_level
+        #else:
+            #return 0.0
+        return 0.0
+    def get_search_server_ip(self):
+        return "127.0.0.1"
+    def get_search_server_port(self):
+        return 1699
+    def get_single_line_entry_text_fields(self):
+        return ["Title"]
+    def get_userland_text_height(self):
+        return 10
+    def get_userland_text_width(self):
+        return 76
+    def should_create_word_spaces(self):
+        return 0
+    def get_text_default_color(self):
+        return (128, 128, 128)
+    def get_text_match_color(self):
+        return (0, 0, 0)
+    def get_text_size(self):
+        return 40
+    def get_textarea_height(self):
+        return 47
+    def get_title(self):
+        if hasattr(self, "title"):
+            return self.title
+        else:
+            return "Virtual Tour"
+    def get_welcome_page(self):
+        if hasattr(self, "welcome_page"):
+            return self.welcome_page # + configuration.get_entry_footer_link()
+        else:
+            return read_file("welcome") # + configuration.get_entry_footer_link()
+    def look_up_view_identifier(self, parsed_name, default_value = None):
+        for view in self.views.values():
+            if view.parse_name() == parsed_name:
+                return view.get_identifier()
+        return default_value
+    def normalize_word_score(self, word_score):
+        lower_bound = .0625
+        #upper_bound = .1875
+        lower_bound = configuration.get_normalizing_lower_bound()
+        upper_bound = configuration.get_normalizing_upper_bound()
+        interim = pow(word_score, configuration.get_normalizing_power())
+        interim = (interim - lower_bound) / (upper_bound - lower_bound)
+        interim = min(1, max(interim, 0))
+        return interim
+    def set_allow_advanced_search(self, allow_advanced_search):
+        self.allow_advanced_search = allow_advanced_search
+    def set_approximate_match_threshold(self, approximate_match_threshold):
+        self.approximate_match_threshold = approximate_match_threshold
+    def set_authenticate(self, authenticate):
+        self.authenticate = authenticate
+    def set_body_tag(self, body_tag):
+        self.body_tag = body_tag
+    def set_cache_duration(self, cache_duration):
+        self.cache_duration = cache_duration
+    def set_display_more_like_this(self, display_more_like_this):
+        self.display_more_like_this = display_more_like_this
+    def set_exact_match_threshold(self, exact_match_threshold):
+        self.exact_match_threshold = exact_match_threshold
+    def set_excerpt_radius(self, excerpt_radius):
+        self.excerpt_radius = excerpt_radius
+    def set_first_view(self, first_view):
+        self.first_view = first_view
+    def set_forget_file_contents(self, forget_file_contents):
+        self.forget_file_contents = forget_file_contents
+    def set_image_extension(self, image_extension):
+        self.image_extension = image_extension
+    def set_image_height(self, image_height):
+        self.image_height = image_height
+    def set_image_width(self, image_width):
+        self.image_width = image_width
+    def set_matches_per_page(self, matches_per_page):
+        self.matches_per_page = matches_per_page
+    def set_normalizing_lower_bound(self, normalizing_lower_bound):
+        self.normalizing_lower_bound = float(normalizing_lower_bound)
+    def set_normalizing_power(self, normalizing_power):
+        self.normalizing_power = float(normalizing_power)
+    def set_normalizing_upper_bound(self, normalizing_upper_bound):
+        self.normalizing_upper_bound = float(normalizing_upper_bound)
+    def set_page_footer(self, page_footer):
+        self.page_footer = page_footer
+    def set_page_header(self, page_header):
+        self.page_header = page_header
+    def set_title(self, program_title):
+        self.set_title(program_title)
+    def set_sacrifice_memory_for_speed_level(self, sacrifice_memory_for_speed_level):
+        self.sacrifice_memory_for_speed_level = sacrifice_memory_for_speed_level
+    def set_save_cache(self, save_cache):
+        self.save_cache = save_cache
+    def set_show_all_quotes_by_default(self, show_all_quotes_by_default):
+        self.show_all_quotes_by_default = show_all_quotes_by_default
+    def set_title(self, title):
+        self.title = title
+    def set_welcome_page(self, welcome_page):
+        self.welcome_page = welcome_page
+    def should_allow_administrative_controls(self):
+        return 1
+    def should_allow_advanced_search(self):
+        if hasattr(self, "allow_advanced_search"):
+            return self.allow_advanced_search
+        else:
+            return 1
+    def should_authenticate(self):
+        if hasattr(self, "authenticate"):
+            return self.authenticate
+        else:
+            return 1
+    def should_autoload_sections(self):
+        return 1
+    def should_cache_proactively(self):
+        return 0
+    def should_color_highlight(self):
+        return 0
+    def should_create_wordspaces(self):
+        return self.should_create_word_spaces()
+    def should_display_frame(self, frame_in_question):
+        if frame_in_question in sequence(self.get_frames_list()):
+            return 1
+        else:
+            return 0
+    def should_display_more_like_this(self):
+        if hasattr(self, "display_more_like_this"):
+            return self.display_more_like_this
+        else:
+            return 0
+    def should_forget_file_contents(self):
+        if hasattr(self, "forget_file_contents"):
+            return self.forget_file_contents
+        else:
+            return 1
+    def should_load_documents_on_initialization(self):
+        return 1
+    def should_override_styles(self):
+        return 0
+    def should_save_cache(self):
+        if hasattr(self, "save_cache"):
+            return self.save_cache
+        else:
+            return 1
+    def should_save_monolith(self):
+        return 1
+    def should_show_all_quotes_by_default(self):
+        if hasattr(self, "show_all_quotes_by_default"):
+            return self.show_all_quotes_by_default
+        else:
+            return 1
+    def should_use_oracle(self):
+        return self.get_program_mode() == "oracle"
+
+class factory_generator(ancestor):
+    """This is broader than a factory class in that it is also a central
+    meeting place for other classes."""
+    def __init__(self):
+        ancestor.__init__(self)
+        self.token_list_consumers = []
+        self.frames = {}
+    def add_token_list_consumer(self, consumer_to_add):
+        self.token_list_consumers.add(consumer_to_add)
+    def delete_token_list_consumer(self, consumer_to_delete):
+        if consumer_to_delete in sequence(self.token_list_consumers):
+            self.token_list_consumers.delete(consumer_to_delete)
+    def get_ancestor(self):
+        """[Non-]generator for a class that shouldn't be instantiated."""
+        return None
+    def get_boolean_parser(self, word_scorer, query_string):
+        return boolean_parser(word_scorer, None, query_string)
+    def get_cache_class(self):
+        return cache_class()
+    def get_closeness(self, space, first_point, second_point, score = None):
+        return closeness(space, first_point, second_point, score)
+    def get_closeness_space(self):
+        return closeness_space() # Work on this.
+    def get_closeness_tree(self, space_for_points, point, maximum_breadth = 7):
+        return closeness_tree(space_for_points, point, maximum_breadth)
+    def get_compass(self):
+        return compass()
+    def get_configuration_class(self):
+        return configuration_class()
+    def get_document(self, filename, section, section_html_name=""):
+        if section != None:
+            return webpage(filename, section)
+        else:
+            if sections.has_key(section_html_name):
+                try:
+                    return webpage(filename, sections[section_html_name])
+                except IOError:
+                    return None
+            else:
+                return None
+    def get_document_space(self):
+        return document_space()
+    def get_folder_tab(self, displayable_name = "", html_value = "",
+      display_function = None, arguments = ()):
+        return folder_tab(displayable_name, html_value, display_function, \
+          arguments)
+    def get_frame(self, frame_name = "master"):
+        if frame_name in sequence(configuration.get_frames_list()):
+            if not self.frames.has_key(frame_name):
+                if frame_name == "administrative_control":
+                    self.frames[frame_name] = self.get_frame_control()
+                if frame_name == "edit_entry":
+                    self.frames[frame_name] = self.get_frame_edit_entry()
+                if frame_name == "master":
+                    self.frames[frame_name] = self.get_frame_master()
+                if frame_name == "process_edit_entry":
+                    self.frames[frame_name] = \
+                      self.get_frame_process_edit_entry()
+                if frame_name == "search":
+                    self.frames[frame_name] = self.get_frame_search()
+                if frame_name == "search_result":
+                    self.frames[frame_name] = \
+                      self.get_frame_search_result_from_html()
+                if frame_name == "search_result_from_html":
+                    self.frames[frame_name] = \
+                      self.get_frame_search_result_from_html()
+                if frame_name == "user_control":
+                    self.frames[frame_name] = self.get_frame_control_user()
+            return self.frames[frame_name]
+        else:
+            return None
+    def get_frame_control(self):
+        return frame_control()
+    def get_frame_control_user(self):
+        return frame_control()
+    def get_frame_edit_entry(self):
+        return frame_edit_entry()
+    def get_frame_master(self):
+        return frame_master()
+    def get_frame_process_edit_entry(self):
+        return frame_process_edit_entry()
+    def get_frame_search(self):
+        return frame_search()
+    def get_frame_search_result(self):
+        return frame_search_result()
+    def get_frame_search_result_from_html(frame):
+        return frame_search_result_from_html()
+    def get_histogram(self):
+        return histogram()
+    def get_language(self):
+        return language()
+    def get_locality_handler(self):
+        return locality_handler()
+    def get_markup_parser(self, document):
+        return markup_parser(document)
+    def get_monolith_class(self):
+        return monolith_class()
+    def get_multitasking_manager(self):
+        return multitasking_manager()
+    def get_navigation(self):
+        return navigation()
+    def get_query(self, query_string = "", search_criteria = None):
+        return query(query_string, search_criteria)
+    def get_query_boolean(self, query_string = ""):
+        return query_boolean(query_string)
+    def get_view(self):
+        return view()
+    def get_search(self, query = None, criteria = None, sections_of_files = \
+      None):
+        return search(query, criteria, sections_of_files)
+    def get_search_criteria(self):
+        result = []
+        result.append(int(get_cgi("should_match_partial_words", "0")))
+        result.append(get_cgi("section_to_search", "top"))
+        result.append(int(get_cgi("show_all_quotes", \
+          str(configuration.should_show_all_quotes_by_default()))))
+        result.append(int(get_cgi("should_display_only_document", "0")))
+        result.append(int(get_cgi("excerpt_radius", \
+          str(configuration.get_excerpt_radius()))))
+        return tuple(result)
+    def get_search_more_like_this(self, query, filename, criteria, section):
+        return search_more_like_this(query, filename, criteria, section)
+    def get_section(self, language="", html_name = "", root=""):
+        return section(language, html_name, root)
+    def get_subsection(self, parent = None):
+        return subsection(parent)
+    def get_thread(self, group=None, target=None, name=None, args=(), \
+      kwargs={}):
+        return threading.Thread(group, target, name, args, kwargs)
+    def get_user_configuration_class(self):
+        return user_configuration_class()
+    def get_webpage(self, filename = None, section = None):
+        return webpage(filename, section)
+    def get_webpage_space(self):
+        return webpage_space()
+    def get_word_form(self, word):
+        return word_form(word)
+    def get_word_numberer_class(self):
+        return word_numberer_class()
+    def get_word_space(self, language):
+        return word_space(language)
+    def list_token_list_consumers(self):
+        return self.token_list_consumers
+    def set_factory(self, new_factory):
+        global factory
+        factory = new_factory
+
+class folder_tab(ancestor):
+    """A tabbed element in a tabbed control."""
+    def __init__(self, displayable_name = "", html_value = "", \
+      display_function = None, arguments = ()):
+        ancestor.__init__(self)
+        self.arguments = arguments
+        self.display_function = display_function
+        self.displayable_name = re.sub(" ", "&nbsp;", displayable_name)
+        ## Work on refining this.
+        self.html_value = (html_value)
+    def display(self, level):
+        build_output(self.display_function(self.arguments, level))
+    def get_actions_control(self, arguments, level):
+        result = []
+        result.append("<script language=\"JavaScript\">\n")
+        result.append("<!--\n")
+        result.append("function perform_action(action)\n")
+        result.append("    {\n")
+        result.append("    document." + configuration.get_program_name() + \
+          ".control_actions_selected_action.value = action\n")
+        result.append("    document." + configuration.get_program_name() + \
+          ".submit()\n")
+        result.append("    }\n")
+        result.append("// -->\n")
+        result.append("</script>\n")
+        result.append("<input type=\"hidden\" " + \
+          "name=\"control_actions_selected_action\" " + \
+          "value=\"none\">")
+        if configuration.should_save_cache():
+            result.append("<p><a style=\"" + \
+              configuration.get_control_link_style() + "\" " + \
+              "href=\"JavaScript:perform_action('reread_documents')\">Reread "\
+              + "Documents Being Searched and Save Cached Data</a></p>")
+        else:
+            result.append("<p><a style=\"" + \
+              configuration.get_control_link_style() + "\" " + \
+              "href=\"JavaScript:perform_action('reread_documents')\">Reread "\
+              + "Documents Being Searched</a></p>")
+        if not THREADING_LEVEL >= 1 or configuration.should_save_cache():
+            result.append("<p><a style=\"" + configuration.get_control_link_style() + \
+              "\" " + \
+              "href=\"JavaScript:perform_action('save_cache')\">Save " + \
+              "Cached Data</a></p>")
+        #result.append("<p><a style=\"" + configuration.get_control_link_style() + "\" " + \
+          #"href=\"JavaScript:perform_action('shut_down_server')\">Shut " + \
+          #"Down Data Mine Server</a></p>")
+        result.append(self.get_submit_link())
+        return "".join(result)
+    def get_appearance_control(self, arguments, level):
+        result = []
+        result.append("Virtual Tour Title:<br>")
+        result.append(get_administrative_text_box("control_appearance_title", \
+          configuration.get_title()) + "</p>")
+        #result.append("<p>HTML Body Tag:<br>")
+        #result.append(get_administrative_textarea( \
+          #"control_appearance_body_tag", configuration.get_body_tag()) + \
+          #"</p>")
+        result.append("<p>Text Below the Picture:<br>")
+        result.append(get_administrative_textarea( \
+          "control_appearance_welcome_page", \
+          configuration.get_welcome_page()) + "</p>")
+        result.append("Page Header:<br>")
+        result.append(get_administrative_textarea("control_appearance_page_header", \
+          configuration.get_page_header()) + "</p>")
+        result.append("Page Footer:<br>")
+        result.append(get_administrative_textarea("control_appearance_page_footer", \
+          configuration.get_page_footer()) + "</p>")
+        result.append(self.get_submit_link())
+        return "".join(result)
+    def get_displayable_name(self):
+        return self.displayable_name
+    def get_html_value(self):
+        return str(self.html_value)
+    def get_language_control(self, arguments, level):
+        language = arguments
+        result = []
+        result.append("<input type=\"hidden\" ")
+        result.append("name=\"control_language_filename\" value=\"")
+        result.append(language.get_filename() + "\">")
+        result.append("<input type=\"hidden\" ")
+        result.append("name=\"control_language_html_name\" value=\"")
+        result.append(language.get_html_name() + "\">")
+        result.append("<p>At the moment this language control is " + \
+          "linguistically crude and does not take into account e.g. " + \
+          "different " + \
+          "lexical categories (among numerous other things).</p>")
+        result.append("<p style=\"font-weight: bold\">Control for " + \
+          "Language: " + \
+          language.get_name() + "</p>")
+        #result.append("<p>Relative filename (please do not specify directory):<br>")
+        #result.append(get_administrative_text_box("control_language_filename", \
+          #language.get_filename()))
+        result.append("<p>Name:<br>")
+        result.append(get_administrative_text_box("control_language_name", \
+          language.get_name()))
+        result.append("</p>")
+        result.append("<p>Closed lexical category words:<br>")
+        result.append(get_administrative_textarea( \
+          "control_language_closed_lexical_category_words", \
+          language.get_closed_lexical_category_words_text()))
+        result.append("</p>")
+        result.append("<p>Prefixes (i.e. \"<strong>in</strong>\" added to " + \
+          "\"edible\" to get \"<strong>in</strong>edible\":<br>")
+        result.append(get_administrative_textarea( \
+          "control_language_prefixes", \
+          language.get_prefixes_from_textarea()))
+        result.append("</p>")
+        result.append("<p>Suffixes (i.e. \"<strong>ed</strong>\" added to " + \
+          "\"open\" to get \"open<strong>ed</strong>\":<br>")
+        result.append(get_administrative_textarea( \
+          "control_language_suffixes", \
+          language.get_suffixes_from_textarea()))
+        result.append("</p>")
+        result.append("<p>Irregular forms and alternate spellings, " + \
+          "separated by a space from what the regular form and standard " + \
+          "spelling would be (i.e. \"ran runned\"):<br>")
+        result.append(get_administrative_textarea( \
+          "control_language_irregulars", language.get_text_irregulars()))
+        result.append("</p>")
+        result.append("<p>May upper/lower case be treated as insignificant? ")
+        result.append("<select name=\"control_language_collapse_case\">")
+        if language.should_collapse_case():
+            result.append("<option value=\"1\" selected>Yes</option>")
+            result.append("<option value=\"0\">No</option>")
+        else:
+            result.append("<option value=\"1\">Yes</option>")
+            result.append("<option value=\"0\" selected>No</option>")
+        result.append("</select></p>")
+        result.append("<p>May duplicate letters (\"pu<strong>dd</strong>le\") be treated as insignificant? ")
+        result.append("<select name=\"control_language_collapse_duplicate_letters\">")
+        if language.should_collapse_duplicate_letters():
+            result.append("<option value=\"1\" selected>Yes</option>")
+            result.append("<option value=\"0\">No</option>")
+        else:
+            result.append("<option value=\"1\">Yes</option>")
+            result.append("<option value=\"0\" selected>No</option>")
+        result.append("</select></p>")
+        result.append("<p>Do you wish to <strong>delete</strong> this" + \
+          " language? ")
+        result.append("<select name=\"control_language_delete\">")
+        result.append("<option value=\"1\">Yes</option>")
+        result.append("<option value=\"0\" selected>No</option>")
+        result.append("</select></p>")
+        result.append(self.get_submit_link())
+        return "".join(result)
+    def get_languages_control(self, arguments, level):
+        function_source = factory.get_folder_tab()
+        result = []
+        language_tabs = []
+        languages = get_languages("should prefix new language")
+        for language in sequence(languages):
+            language_tabs.append(factory.get_folder_tab( \
+              language.get_name(), language.get_html_name(), \
+              function_source.get_language_control, (language)))
+        build_output_tabs(level + 1, language_tabs, language_tabs[0])
+        # May be a bug here. I don't like the way this works.
+        return "".join(result)
+    def get_miscellaneous_control(self, arguments, level):
+        result = []
+        #result.append("<p>What should the title be?<br>")
+        #result.append(get_administrative_text_box( \
+          #"control_miscellaneous_program_title", \
+          #configuration.get_title()))
+        result.append("<p>What room should be shown first? ")
+        result.append(get_view_choice(configuration.get_first_view(), \
+          "control_miscellaneous_first_view", 0, 0))
+        result.append("</p>")
+        result.append("<p>How thick (0.0 to 1.0) should the ")
+        result.append("left/right/top/bottom borders be, so that ")
+        result.append("clicking on them will take you left, right, etc? ")
+        result.append(get_administrative_text_box( \
+          "control_miscellaneous_margin_width", \
+          configuration.get_navigation().get_margin_width(), 5))
+        result.append("</p>")
+        result.append("<p>What <strong>width</strong> should be assumed ")
+        result.append("for pictures, unless otherwise specified? ")
+        result.append(get_administrative_text_box( \
+          "control_miscellaneous_image_width", \
+          configuration.get_image_width(), 5))
+        result.append("</p>")
+        result.append("<p>What <strong>height</strong> should be assumed ")
+        result.append("for pictures, unless otherwise specified? ")
+        result.append(get_administrative_text_box( \
+          "control_miscellaneous_image_height", \
+          configuration.get_image_height(), 5))
+        result.append("</p>")
+        result.append("<p>What (case-sensitive) <strong>filename ")
+        result.append("extension</strong> should be assumed for the images ")
+        result.append("files you provide ('gif', 'jpeg', 'png', etc.)? ")
+        result.append(get_administrative_text_box( \
+          "control_miscellaneous_image_extension", \
+          configuration.get_image_extension(), 5))
+        #result.append("<p>How many results should be shown per page? ")
+        #result.append("<input type=\"text\" ")
+        #result.append("name=\"control_miscellaneous_matches_per_page\" ")
+        #result.append("size=\"5\" value=\"" + \
+          #str(configuration.get_matches_per_page()) + "\"></p>")
+        #result.append("<p>How many words should be shown before and after ")
+        #result.append("each keyword quoted in the search results? ")
+        #result.append("<input type=\"text\" ")
+        #result.append("name=\"control_miscellaneous_excerpt_radius\" ")
+        #result.append("size=\"5\" value=\"" + \
+          #str(configuration.get_excerpt_radius()) + "\"></p>")
+        #result.append("<p>How long should data be kept in the cache for? ")
+        #result.append("<input type=\"text\" ")
+        #result.append("name=\"control_miscellaneous_cache_duration_hours\" ")
+        #result.append("size=\"5\" value=\"")
+        #result.append(str(configuration.get_cache_duration() / 3600))
+        #result.append("\"> hours, ")
+        #result.append("<input type=\"text\" ")
+        #result.append("name=\"control_miscellaneous_cache_duration_minutes\" ")
+        #result.append("size=\"5\" value=\"")
+        #result.append(str((configuration.get_cache_duration() % 3600) / 60))
+        #result.append("\"> minutes, ")
+        #result.append("<input type=\"text\" ")
+        #result.append("name=\"control_miscellaneous_cache_duration_seconds\" ")
+        #result.append("size=\"5\" value=\"")
+        #result.append(str(configuration.get_cache_duration() % 60))
+        #result.append("\"> seconds.</p>")
+        #result.append("<p>Should results have a More Like This link? ")
+        #result.append("<select name=\"control_miscellaneous_should_display_more_like_this\">")
+        #if configuration.should_display_more_like_this():
+            #result.append("<option value=\"1\" selected>Yes</option>")
+            #result.append("<option value=\"0\">No</option>")
+        #else:
+            #result.append("<option value=\"1\">Yes</option>")
+            #result.append("<option value=\"0\" selected>No</option>")
+        #result.append("</select></p>")
+        #result.append("<p>Should results show all occurrences by default? ")
+        #result.append("<select name=\"control_miscellaneous_should_show_all_quotes_by_default\">")
+        #if configuration.should_show_all_quotes_by_default():
+            #result.append("<option value=\"1\" selected>Yes</option>")
+            #result.append("<option value=\"0\">No</option>")
+        #else:
+            #result.append("<option value=\"1\">Yes</option>")
+            #result.append("<option value=\"0\" selected>No</option>")
+        #result.append("</select></p>")
+        #result.append("<p>What level of extra memory should the program use to be faster? ")
+        #result.append("<select name=\"control_miscellaneous_sacrifice_memory_for_speed_level\">")
+        #if configuration.get_sacrifice_memory_for_speed_level() == 1.0:
+            #result.append("<option value=\"1.0\" selected>High</option>")
+            #result.append("<option value=\"0.5\">Low</option>")
+            #result.append("<option value=\"0.0\">None</option>")
+        #elif configuration.get_sacrifice_memory_for_speed_level() == 0.5:
+            #result.append("<option value=\"1.0\">High</option>")
+            #result.append("<option value=\"0.5\" selected>Low</option>")
+            #result.append("<option value=\"0.0\">None</option>")
+        #else:
+            #result.append("<option value=\"1.0\">High</option>")
+            #result.append("<option value=\"0.5\">Low</option>")
+            #result.append("<option value=\"0.0\" selected>None</option>")
+        #result.append("</select></p>")
+        #result.append("<p>Should the option of an advanced search be made " + \
+          #"available? ")
+        #result.append("<select name=\"control_miscellaneous_should_allow_advanced_search\">")
+        #if configuration.should_allow_advanced_search():
+            #result.append("<option value=\"1\" selected>Yes</option>")
+            #result.append("<option value=\"0\">No</option>")
+        #else:
+            #result.append("<option value=\"1\">Yes</option>")
+            #result.append("<option value=\"0\" selected>No</option>")
+        #result.append("</select></p>")
+        #result.append("<p>Should the cache contents be saved? ")
+        #result.append("<select name=\"control_miscellaneous_should_save_cache\">")
+        #if configuration.should_save_cache():
+            #result.append("<option value=\"1\" selected>Yes</option>")
+            #result.append("<option value=\"0\">No</option>")
+        #else:
+            #result.append("<option value=\"1\">Yes</option>")
+            #result.append("<option value=\"0\" selected>No</option>")
+        #result.append("</select></p>")
+        result.append("<p>Should a password be required to use this configuration page? ")
+        result.append("<select name=\"control_miscellaneous_should_authenticate\">")
+        if configuration.should_authenticate():
+            result.append("<option value=\"1\" selected>Yes</option>")
+            result.append("<option value=\"0\">No</option>")
+        else:
+            result.append("<option value=\"1\">Yes</option>")
+            result.append("<option value=\"0\" selected>No</option>")
+        result.append("</select></p>")
+        result.append(self.get_submit_link())
+        return "".join(result)
+    def get_parameters_control(self, arguments, level):
+        result = []
+        result.append("<p>Normalizing lower bound for scores:<br>")
+        result.append(get_administrative_text_box(\
+          "control_parameter_normalizing_lower_bound", \
+          configuration.get_normalizing_lower_bound()))
+        result.append("</p>")
+        result.append("<p>Normalizing upper bound for scores:<br>")
+        result.append(get_administrative_text_box(\
+          "control_parameter_normalizing_upper_bound", \
+          configuration.get_normalizing_upper_bound()))
+        result.append("</p>")
+        result.append("<p>Normalizing power for scores:<br>")
+        result.append(get_administrative_text_box(\
+          "control_parameter_normalizing_power", \
+          configuration.get_normalizing_power()))
+        result.append("</p>")
+        result.append("<p>Threshold for exact match:<br>")
+        result.append(get_administrative_text_box(\
+          "control_parameter_exact_match_threshold",
+          configuration.get_exact_match_threshold()))
+        result.append("</p>")
+        result.append("<p>Threshold for approximate match:<br>")
+        result.append(get_administrative_text_box(\
+          "control_parameter_approximate_match_threshold",
+          configuration.get_approximate_match_threshold()))
+        result.append("</p>")
+        result.append(self.get_submit_link())
+        return "".join(result)
+    def get_section_control(self, arguments, level):
+        section = arguments[0]
+        if arguments[1] == "section" or arguments[1] == "sections":
+            is_subsection = 0
+        else:
+            is_subsection = 1
+        result = []
+        result.append("<input type=\"hidden\" ")
+        result.append("name=\"control_section_html_name\" value=\"")
+        result.append(section.get_html_name())
+        result.append("\"")
+        result.append("<p>Name:<br>")
+        result.append(get_administrative_text_box("control_section_name", \
+          section.get_name()))
+        result.append("</p>")
+        if is_subsection:
+            result.append("<p>Parent (may be a section or subsection): ")
+            result.append(get_section_choice(section.get_parent(), \
+              "control_section_parent", section.get_html_name()))
+            result.append("</p>")
+        else:
+            result.append("<p>Filesystem path to root of heirarchy to search:<br>")
+            result.append(get_administrative_text_box( \
+              "control_section_document_root", \
+              condense_path(section.get_root())))
+            result.append("</p>")
+        result.append("<p>Relative path to home page for document:<br>")
+        result.append(get_administrative_text_box( \
+          "control_section_index", condense_path(section.get_index())))
+        result.append("</p>")
+        #result.append("<p>Language for these documents: ")
+        #result.append("<select name=\"control_section_language\">")
+        for language in sequence(get_languages()):
+            #result.append("<option value=\"")
+            #result.append(language.get_html_name())
+            if section.get_language_identifier == language.get_html_name() or \
+              language.get_name() == "Generic" and \
+              section.get_language_identifier() == "":
+                result.append("<input type=\"hidden\" ")
+                result.append("name=\"control_section_language\" value=\"")
+                result.append(language.get_html_name())
+                result.append("\">")
+                #result.append("\" selected>")
+            #else:
+                #result.append("\">")
+            #result.append(language.get_name())
+            #result.append("</option>")
+        #result.append("</select></p>")
+        result.append("<p>Regular expression patterns to <strong>in</strong>clude")
+        result.append(" (it is OK to leave this blank; if you leave both these blank, any document will be accepted):<br>")
+        result.append(get_administrative_textarea( \
+          "control_section_patterns_to_accept", \
+          section.get_text_patterns_to_accept()))
+        result.append("</p>")
+        result.append("<p>Regular expression patterns to <strong>ex</strong>clude")
+        result.append(" (it is OK to leave this blank):<br>")
+        result.append(get_administrative_textarea( \
+          "control_section_patterns_to_deny", \
+          section.get_text_patterns_to_deny()))
+        result.append("</p>")
+        if not is_subsection:
+            result.append("<p>URL prefix for documents' root (what would you type in a browser to browse their root):<br>")
+            result.append(get_administrative_text_box( \
+              "control_section_url_prefix", section.get_url_prefix()))
+            result.append("</p>")
+            result.append("<p>URL prefix for server's root (what would you ")
+            result.append("type in a browser to browse server's root):<br>")
+            result.append(get_administrative_text_box( \
+              "control_section_url_root", section.get_url_root()))
+            result.append("</p>")
+        result.append("<p>Do you wish to <strong>delete</strong> this")
+        if is_subsection:
+            result.append(" subsection? ")
+        else:
+            result.append(" section? ")
+        result.append("<select name=\"control_section_delete\">")
+        result.append("<option value=\"1\">Yes</option>")
+        result.append("<option value=\"0\" selected>No</option>")
+        result.append("</select></p>")
+        result.append(self.get_submit_link())
+        return "".join(result)
+    def get_views_control(self, arguments, level):
+        result = []
+        view_identifier = get_view_identifier()
+        result.append("<input type=\"hidden\" name=\"view_edited\" ")
+        result.append("value=\"")
+        result.append(view_identifier)
+        result.append("\">")
+        if view_identifier == "new_view":
+            view = factory.get_view()
+        else:
+            try:
+                view = configuration.get_views()[view_identifier]
+            except KeyError:
+                view = factory.get_view()
+        function_source = factory.get_folder_tab()
+        result.append("<p><strong>View:</strong> ")
+        result.append(get_view_choice(view_identifier, "control_views_identifier", 1))
+        result.append("</p>")
+        result.append("<p><strong>Full View Name:</strong><br>")
+        result.append(get_administrative_text_box( \
+          "control_views_full_name", view.get_value("full_name")))
+        if view_identifier != "new_view":
+            result.append("<br><br><br>")
+            result.append("<table align=\"center\" border=\"0\" cellpadding=\"")
+            result.append(str(configuration.get_border_width()))
+            result.append("\" cellspacing=\"0\"><tr><td bgcolor=\"black\">")
+            result.append( \
+              "<table border=\"0\" cellpadding=\"0\" cellspacing=\"0\">")
+            result.append("<tr><td>")
+            result.append("<img src=\"")
+            result.append(view.get_url())
+            result.append("\" alt=\"" + view.get_title() + "\">")
+            result.append("</td></tr></table></td></tr></table>")
+        result.append("<h2>Optional:</h2>")
+        result.append("<p><em>If you fill out the full view name the way that's ")
+        result.append("described in the documentation, you shouldn't usually ")
+        result.append("need to fill out these items.</em> They may be ")
+        result.append("useful to override the default values to connect ")
+        result.append("different regions.</p>")
+        result.append("<p><strong>View Title:</strong><br>")
+        result.append(get_administrative_text_box("control_views_title", \
+          view.get_value("view_title")))
+        result.append("</p>")
+        result.append("<p><strong>Relative Filename:</strong><br>")
+        result.append(get_administrative_text_box( \
+          "control_views_relative_filename", \
+          view.get_value("relative_filename")))
+        result.append("</p>")
+        navigation = configuration.get_navigation()
+        result.append("<table border=\"0\">")
+        for region in navigation.get_regions():
+            result.append("<tr><td><strong>")
+            result.append(region[0])
+            result.append(":</strong></td><td>")
+            result.append(get_view_choice(view.get_value("region_" + \
+              region[0], "default"), "control_views_region_" + region[0], 0, \
+              1, "default"))
+            result.append("</td></tr>")
+        result.append("</table>")
+        result.append("<p><strong>Image Width:</strong> ")
+        if view.has_image_width():
+            result.append(get_administrative_text_box( \
+              "control_views_image_width", \
+              view.get_image_width(), 5))
+        else:
+            result.append(get_administrative_text_box( \
+              "control_views_image_width", \
+              "", 5))
+        result.append("</p>")
+        result.append("<p><strong>Image Height:</strong> ")
+        if view.has_image_height():
+            result.append(get_administrative_text_box( \
+              "control_views_image_height", \
+              view.get_image_height(), 5))
+        else:
+            result.append(get_administrative_text_box( \
+              "control_views_image_height", \
+              "", 5))
+        result.append("</p>")
+        result.append("""<p><input type="checkbox"
+        name="control_views_should_delete" value="yes"> DELETE this
+        view.</p>""")
+        result.append(get_submit_link())
+        return "".join(result)
+    def get_sections_control(self, arguments, level):
+        function_source = factory.get_folder_tab()
+        result = []
+        section_tabs = []
+        if arguments == "section" or arguments == "sections":
+            entries = get_sections("should prefix new section")
+        else:
+            entries = get_subsections("should prefix new subsection")
+        for my_section in sequence(entries):
+            section_tabs.append(factory.get_folder_tab( \
+              my_section.get_name(), my_section.get_html_name(), \
+              function_source.get_section_control, (my_section, arguments)))
+        build_output_tabs(level + 1, section_tabs, section_tabs[0])
+        return ""
+    def get_submit_link(self):
+        return "<p align=\"center\"><a style=\"" + \
+          configuration.get_control_link_style() + \
+          "\" href=\"JavaScript:document." + \
+          configuration.get_program_name() + ".submit()\">Submit</a></p>"
+    def get_system_control(self, arguments, level):
+        return "<p>System Control</p>" + self.get_submit_link()
+    def get_user_control(self, arguments, level):
+        return "<p>User Preferences Control</p>" + self.get_submit_link()
+
+class frame(ancestor):
+    """The ancestor to all HTML frame classes. Treat as abstract."""
+    def __init__(self):
+        ancestor.__init__(self)
+    def display(self):
+        pass
+    def get_approximate_match_style(self):
+        return "font-weight: bold; color: #404040"
+    def get_exact_match_style(self):
+        return "font-size: larger; font-weight: bold; color: #000000"
+    def get_url(self):
+        return configuration.get_action_url()
+
+class frame_control(frame):
+    """The control panel frame."""
+    def __init__(self):
+        ancestor.__init__(self)
+        self.should_update_configuration = 0
+    def display(self):
+        global output_in_progress
+        function_source = factory.get_folder_tab()
+        level = 1
+        self.process_submitted_changes(level)
+        header = configuration.get_page_header()
+        header = string.replace(header, "@TITLE@", \
+          configuration.get_frame_title("control"))
+        output_so_far = "".join(output_in_progress)
+        output_so_far = string.replace(output_so_far, "@TITLE@", \
+          configuration.get_title())
+        output_in_progress = [output_so_far]
+        header = string.replace(header, "@BODY_TAG@", \
+          configuration.get_body_tag())
+        build_output(header)
+        build_output("<br>")
+        #build_output("<form action=\"" + configuration.get_action_url() + \
+          #"\" name=\"" + configuration.get_program_name() + \
+          #"\" method=\"get\">")
+        build_output("<input type=\"hidden\" name=\"page_mode\" value=\"" \
+          + get_cgi("page_mode", "user_control") + "\">")
+        build_output("<input type=\"hidden\" name=\"mode\" value=\"" \
+          + get_cgi("mode", "edit") + "\">")
+        build_output("<input type=\"hidden\" name=\"should_close\" " + \
+          "value=\"0\">")
+        if get_cgi("should_close", "0") == "1":
+            build_output("<script language=\"JavaScript\">\n")
+            build_output("<!--\n")
+            build_output("window.close()\n")
+            build_output("// -->\n")
+            build_output("</script>\n")
+        build_output("<script language=\"JavaScript\">\n")
+        build_output("<!--\n")
+        build_output("function submit_and_close()\n")
+        build_output("    {\n")
+        build_output("    document." + configuration.get_program_name() + \
+          ".should_close.value = 1\n")
+        build_output("    document." + configuration.get_program_name() + \
+          ".submit()\n")
+        build_output("    }\n")
+        build_output("// -->\n")
+        build_output("</script>\n")
+        if authenticate():
+            build_output("<input type=\"hidden\" name=\"administrator_password\" value=\"" \
+              + get_cgi("administrator_password") + "\">")
+            build_output("<input type=\"hidden\" name=\"user_selected_tab\" " \
+              + "value=\"\">")
+            build_output("<input type=\"hidden\" name=\"user_selected_level\" "\
+              + "value=\"\">")
+            build_output("<script language=\"JavaScript\">\n")
+            build_output("<!--\n")
+            build_output("function select_tab(html_name, level)\n")
+            build_output("    {\n")
+            build_output("    document." + configuration.get_program_name() + \
+              ".user_selected_tab.value = html_name\n")
+            build_output("    document." + configuration.get_program_name() + \
+              ".user_selected_level.value = level\n")
+            build_output("    document." + configuration.get_program_name() + \
+              ".submit()\n")
+            build_output("    }\n")
+            build_output("// -->\n")
+            build_output("</script>\n")
+            actions_tab = factory.get_folder_tab("Actions", "actions", \
+              function_source.get_actions_control, ())
+            appearance_tab = factory.get_folder_tab("Appearance", \
+              "appearance", function_source.get_appearance_control, ())
+            languages_tab = factory.get_folder_tab("Languages", "languages", \
+              function_source.get_languages_control, (level))
+            miscellaneous_tab = factory.get_folder_tab("Miscellaneous", \
+              "miscellaneous", function_source.get_miscellaneous_control, ())
+            parameters_tab = factory.get_folder_tab("Parameters", \
+              "parameters", function_source.get_parameters_control, ())
+            views_tab = factory.get_folder_tab("Room Views", "views", \
+              function_source.get_views_control, ())
+            sections_tab = factory.get_folder_tab("Sections", \
+              "sections", function_source.get_sections_control, ("sections"))
+            subsections_tab = factory.get_folder_tab("Subsections", \
+              "subsections", function_source.get_sections_control, \
+              ("subsections"))
+            system_tab = factory.get_folder_tab("System", \
+              "system", function_source.get_system_control, ())
+            user_tab = factory.get_folder_tab("User Preferences (Default)", \
+              "user", function_source.get_user_control, (1))
+            #tab_list = [appearance_tab, languages_tab, miscellaneous_tab, \
+              #parameters_tab, sections_tab, subsections_tab, system_tab, \
+              #user_tab]
+            tab_list = [appearance_tab, miscellaneous_tab, \
+              views_tab]
+            current_tab = views_tab
+            build_output_tabs(level, tab_list, current_tab)
+        else:
+            build_output("<center>")
+            build_output("<h2>Password Needed</h2>")
+            build_output("<p>Please enter the password ")
+            build_output("stored in file <tt>" + get_config_value("data_root") + \
+              "/password</tt> on the server:</p>")
+            build_output("<input type=\"password\" ")
+            build_output("name=\"administrator_password\" size=\"40\"><br>")
+            build_output("<br><input type=\"image\" name=\"submit\" ")
+            build_output("value=\"submit\" alt=\"submit\" border=\"0\" ")
+            build_output("align=\"center\" src=\"")
+            build_output(configuration.convert_to_url("submit.gif") + "\"><br><br>")
+            build_output("</center>")
+        build_output("<p align=\"center\"><a style=\"" + \
+          configuration.get_control_link_style() + \
+          "\" href=\"JavaScript:submit_and_close()\">Close Window</a></p>")
+        build_output("</form>")
+        build_output(configuration.get_page_footer())
+    def process_submitted_actions(self):
+        action = get_cgi("control_actions_selected_action")
+        if action == "none":
+            return
+        elif action == "reread_documents":
+            if THREADING_LEVEL >= 1:
+                thread = factory.get_thread(None, \
+                  reread_documents_and_save_cache, \
+                  None, [], {})
+                thread.start()
+            else:
+                reread_documents_and_save_cache()
+        elif action == "save_cache":
+            save_object(monolith, "cache")
+        elif action == "shut_down_server":
+            sys.exit(0)
+    def process_submitted_appearance_changes(self):
+        configuration.set_body_tag(get_cgi("control_appearance_body_tag", \
+          configuration.get_body_tag()))
+        configuration.set_title(get_cgi("control_appearance_title", \
+          configuration.get_title()))
+        configuration.set_welcome_page(get_cgi( \
+          "control_appearance_welcome_page", configuration.get_welcome_page()))
+        configuration.set_page_header(get_cgi( \
+          "control_appearance_page_header", configuration.get_page_header()))
+        configuration.set_page_footer(get_cgi( \
+          "control_appearance_page_footer", configuration.get_page_footer()))
+    def process_submitted_changes(self, level):
+        if authenticate():
+            text_level = str(level)
+            parent_tab_name = get_cgi("selected_tab_" + text_level, None)
+            if parent_tab_name != None:
+                if parent_tab_name == "actions":
+                    self.process_submitted_actions()
+                if parent_tab_name == "appearance":
+                    self.process_submitted_appearance_changes()
+                elif parent_tab_name == "languages":
+                    self.process_submitted_language_changes()
+                elif parent_tab_name == "miscellaneous":
+                    self.process_submitted_miscellaneous_changes()
+                elif parent_tab_name == "parameters":
+                    self.process_submitted_parameters_changes()
+                elif parent_tab_name == "views":
+                    self.process_submitted_views_changes()
+                elif parent_tab_name == "sections":
+                    self.process_submitted_sections_changes(0)
+                elif parent_tab_name == "subsections":
+                    self.process_submitted_sections_changes(1)
+                elif parent_tab_name == "system":
+                    self.process_submitted_system_changes()
+                elif parent_tab_name == "user":
+                    self.process_submitted_user_changes()
+                save_configuration()
+    def process_submitted_language_changes(self):
+        new_language = factory.get_language()
+        if get_cgi("control_language_delete", "0") == "1":
+            if languages.has_key(get_cgi("control_language_html_name")):
+                del languages[get_cgi("control_language_html_name")]
+                os.remove(get_config_value("data_root") + "pickled/languages/" + \
+                  get_cgi("control_language_filename"))
+        elif get_cgi("control_language_name", \
+          new_language.get_default_name()) \
+          != new_language.get_default_name() or \
+          get_cgi("control_language_prefixes", \
+          new_language.get_prefixes_from_textarea()) \
+          != new_language.get_prefixes_from_textarea() or \
+          get_cgi("control_language_suffixes", \
+          new_language.get_suffixes_from_textarea()) \
+          != new_language.get_suffixes_from_textarea() or \
+          get_cgi("control_language_irregulars", \
+          new_language.get_text_irregulars()) \
+          != new_language.get_text_irregulars() or \
+          get_cgi("control_language_closed_lexical_category_words", \
+          str(new_language.get_closed_lexical_category_words_text())) != \
+          str(new_language.get_closed_lexical_category_words_text()) or \
+          get_cgi("control_language_collapse_case", \
+          str(new_language.should_collapse_case())) != \
+          str(new_language.should_collapse_case()) or \
+          get_cgi("control_language_collapse_duplicate_letters", \
+          str(new_language.should_collapse_duplicate_letters())) != \
+          str(new_language.should_collapse_duplicate_letters()):
+            file_to_delete = None
+            if languages.has_key(get_cgi("control_language_html_name")):
+                language_to_save = \
+                  languages[get_cgi("control_language_html_name")]
+            else:
+                language_to_save = new_language
+            language_to_save.set_html_name(get_cgi(\
+              "control_language_html_name", new_language.get_html_name()))
+            language_to_save.set_name(get_cgi("control_language_name", \
+              new_language.get_default_name()))
+            language_to_save.set_text_prefixes( \
+              get_cgi("control_language_prefixes",
+              new_language.get_prefixes_from_textarea()))
+            language_to_save.set_text_suffixes( \
+              get_cgi("control_language_suffixes",
+              new_language.get_suffixes_from_textarea()))
+            language_to_save.set_closed_lexical_category_words_text(\
+              get_cgi("control_language_closed_lexical_category_words", \
+              new_language.get_closed_lexical_category_words_text()))
+            language_to_save.set_collapse_case( \
+              int(get_cgi("control_language_collapse_case", \
+              str(new_language.should_collapse_case()))))
+            language_to_save.set_collapse_duplicate_letters( \
+              int(get_cgi("control_language_collapse_duplicate_letters", \
+              str(new_language.should_collapse_duplicate_letters()))))
+            save_object(language_to_save, "languages/" + \
+              language_to_save.get_filename())
+            if file_to_delete != None:
+                os.remove(get_config_value("data_root") + "pickled/languages/" + file_to_delete)
+            languages[language_to_save.get_html_name()] = language_to_save
+    def process_submitted_miscellaneous_changes(self):
+        try:
+            configuration.get_navigation().set_margin_width(float(get_cgi( \
+              "control_miscellaneous_margin_width", \
+              str(configuration.get_navigation().get_margin_width()))))
+        except ValueError:
+            pass
+        #configuration.set_title(get_cgi( \
+          #"control_miscellaneous_program_title", \
+          #configuration.get_title()))
+        try:
+            configuration.set_matches_per_page(int(get_cgi( \
+              "control_miscellaneous_matches_per_page",
+              str(configuration.get_matches_per_page()))))
+        except ValueError:
+            pass
+        try:
+            configuration.set_excerpt_radius(int(get_cgi( \
+              "control_miscellaneous_excerpt_radius",
+              str(configuration.get_excerpt_radius()))))
+        except ValueError:
+            pass
+        try:
+            configuration.set_cache_duration(int(get_cgi( \
+              "control_miscellaneous_cache_duration_hours")) * 3600 + \
+              int(get_cgi("control_miscellaneous_cache_duration_minutes")) * \
+              60 + \
+              int(get_cgi("control_miscellaneous_cache_duration_seconds")))
+        except ValueError:
+            pass
+        if get_cgi("control_miscellaneous_first_view") != "":
+            configuration.set_first_view(get_cgi(\
+              "control_miscellaneous_first_view"))
+        configuration.set_show_all_quotes_by_default(int(get_cgi( \
+          "control_miscellaneous_should_show_all_quotes_by_default", \
+          str(configuration.should_show_all_quotes_by_default()))))
+        configuration.set_display_more_like_this(int(get_cgi( \
+          "control_miscellaneous_should_display_more_like_this", \
+          str(configuration.should_display_more_like_this()))))
+        configuration.set_sacrifice_memory_for_speed_level(float(get_cgi(\
+          "control_miscellaneous_should_sacrifice_memory_for_speed", str(\
+          configuration.get_sacrifice_memory_for_speed_level()))))
+        configuration.set_allow_advanced_search(int(get_cgi(\
+          "control_miscellaneous_should_allow_advanced_search", str(\
+          configuration.should_allow_advanced_search()))))
+        configuration.set_save_cache(int(get_cgi(\
+          "control_miscellaneous_should_save_cache", str(\
+          configuration.should_save_cache()))))
+        configuration.set_authenticate(int(get_cgi( \
+          "control_miscellaneous_should_authenticate", str(\
+          configuration.should_authenticate()))))
+        configuration.set_image_extension(get_cgi( \
+          "control_miscellaneous_image_extension", \
+          configuration.get_image_extension()))
+        try:
+            configuration.set_image_height(int(get_cgi( \
+              "control_miscellaneous_image_height", str( \
+              configuration.get_image_height()))))
+        except ValueError:
+            pass
+        try:
+            configuration.set_image_width(int(get_cgi( \
+              "control_miscellaneous_image_width", str( \
+              configuration.get_image_width()))))
+        except ValueError:
+            pass
+    def process_submitted_parameters_changes(self):
+        configuration.set_normalizing_lower_bound(float(get_cgi(\
+          "control_parameters_normalizing_lower_bound", "0.06")))
+        configuration.set_normalizing_upper_bound(float(get_cgi(\
+          "control_parameters_normalizing_upper_bound", "0.4")))
+        configuration.set_normalizing_power(float(get_cgi(\
+          "control_parameters_normalizing_power", "0.06")))
+        configuration.set_approximate_match_threshold(float(get_cgi(\
+          "control_parameters_approximate_match_threshold", "0.5")))
+        configuration.set_exact_match_threshold(float(get_cgi(\
+          "control_parameters_exact_match_threshold", "1")))
+        save_configuration()
+    def process_submitted_views_changes(self):
+        views = configuration.get_views()
+        identifier = get_cgi("view_edited")
+        if not views.has_key(identifier) and not identifier == "new_view":
+            return
+        if get_cgi("control_views_should_delete") != "":
+            del views[identifier]
+        else:
+            if identifier == "new_view":
+                if get_cgi("control_views_full_name") != "":
+                    view = factory.get_view()
+                    identifier = view.get_identifier()
+                    views[identifier] = view
+                else:
+                    return
+            else:
+                view = views[identifier]
+            for key in get_cgi_keys_meeting_regexp("\Acontrol_views_.*"):
+                if key != "control_views_should_delete" and \
+                  key != "control_views_identifier" and \
+                  key != "control_views_should_delete":
+                    view.set_from_cgi(key)
+            
+                    ## What kind of fence post logic was needed last time for
+                    ## the first addition of a new view?
+                    
+    def process_submitted_sections_changes(self, is_subsection):
+        if is_subsection:
+            if subsections.has_key(get_cgi("control_section_html_name")):
+                live_section = subsections[get_cgi("control_section_html_name")]
+            else:
+                live_section = factory.get_subsection()
+                live_section.set_html_name(get_cgi("control_section_html_name"))
+        else:
+            if sections.has_key(get_cgi("control_section_html_name")):
+                live_section = sections[get_cgi("control_section_html_name")]
+            else:
+                live_section = factory.get_section()
+                live_section.set_html_name(get_cgi("control_section_html_name"))
+        if get_cgi("control_section_name", \
+          live_section.get_default_name()) \
+          != live_section.get_default_name() or \
+          get_cgi("control_section_document_root", \
+          live_section.get_root()) \
+          != live_section.get_root() or \
+          get_cgi("control_section_index", \
+          live_section.get_index()) \
+          != live_section.get_index() or \
+          get_cgi("control_section_patterns_to_accept", \
+          live_section.get_text_patterns_to_accept()) \
+          != live_section.get_text_patterns_to_accept() or \
+          get_cgi("control_section_patterns_to_deny", \
+          live_section.get_text_patterns_to_deny()) \
+          != live_section.get_text_patterns_to_deny() or \
+          get_cgi("control_section_url_prefix", \
+          live_section.get_url_prefix()) \
+          != live_section.get_url_prefix() or \
+          get_cgi("control_section_url_root", \
+          live_section.get_url_root()) \
+          != live_section.get_url_root():
+            value = get_cgi("control_section_name", live_section.get_name())
+            live_section.set_name(value)
+            value = get_cgi("control_section_document_root", \
+              live_section.get_root())
+            live_section.set_root(value)
+            value = get_cgi("control_section_index", \
+              live_section.get_index())
+            live_section.set_index(value)
+            value = get_cgi("control_section_language", \
+              live_section.get_language_identifier())
+            live_section.set_language_identifier(value)
+            value = get_cgi("control_section_patterns_to_accept", \
+              live_section.get_text_patterns_to_accept())
+            live_section.set_text_patterns_to_accept(value)
+            value = get_cgi("control_section_patterns_to_deny", \
+              live_section.get_text_patterns_to_deny())
+            live_section.set_text_patterns_to_deny(value)
+            value = get_cgi("control_section_url_prefix", \
+              live_section.get_url_prefix())
+            live_section.set_url_prefix(value)
+            if is_subsection:
+                value = get_cgi("control_section_parent",
+                  live_section.get_parent())
+                live_section.set_parent(value)
+            value = get_cgi("control_section_url_root", \
+              live_section.get_url_root())
+            live_section.set_url_root(value)
+            if not int(get_cgi("control_section_delete", "0")):
+                if is_subsection:
+                    subsections[get_cgi("control_section_html_name")] = \
+                      live_section
+                    live_section.save("subsections/" + \
+                      get_cgi("control_section_html_name"))
+                else:
+                    sections[get_cgi("control_section_html_name")] = \
+                      live_section
+                    live_section.save("sections/" + \
+                      get_cgi("control_section_html_name"))
+        if int(get_cgi("control_section_delete", "0")):
+            if get_cgi("control_section_parent" != ""):
+                if sections.has_key(get_cgi("control_section_html_name")):
+                    del subsections[get_cgi("control_section_html_name")]
+                    os.remove(get_config_value("data_root") + "pickled/subsections/" + \
+                      get_cgi("control_section_html_name"))
+            else:
+                if sections.has_key(get_cgi("control_section_html_name")):
+                    del sections[get_cgi("control_section_html_name")]
+                    os.remove(get_config_value("data_root") + "pickled/sections/" + \
+                      get_cgi("control_section_html_name"))
+    def process_submitted_system_changes(self):
+        pass
+    def process_submitted_user_changes(self):
+        pass
+
+class frame_edit_entry(frame):
+    """The frame to create or edit an existing entry (result page)."""
+    def __init__(self):
+        frame.__init__(self)
+    def display(self):
+        entry_identifier = get_cgi("entry_identifier", "new_entry")
+        if get_cgi("should_delete") == "yes":
+            entry_identifier = "new_entry"
+        header = configuration.get_page_header()
+        header = string.replace(header, "@TITLE@", \
+          configuration.get_frame_title("edit_entry"))
+        header = string.replace(header, "@BODY_TAG@", \
+          configuration.get_body_tag())
+        build_output(header)
+        build_output("<form action=\"" + configuration.get_action_url() + \
+          "\" method=\"" + configuration.get_action_method() + \
+          "\" name=\"" + configuration.get_program_name() + "\">")
+        build_output("<input type=\"hidden\" name=\"page_mode\" value=\"" + \
+          "process_edit_entry\">")
+        build_output("<input type=\"hidden\" name=\"entry_identifier\" " + \
+          "value=\"" + entry_identifier + "\">")
+        for field in configuration.get_entry_text_fields():
+            if field in configuration.get_invisible_fields():
+                if field == "PermanentID":
+                    if self.get_previous_value(entry_identifier, field) != "":
+                        build_output("<input type=\"hidden\" " + \
+                          "name=\"field_PermanentID\" value=\"" + \
+                          self.get_previous_value(entry_identifier, field) + \
+                          "\">")
+                    else:
+                        build_output("<input type=\"hidden\" " + \
+                          "name=\"field_PermanentID\" value=\"" + \
+                          str(time.time()) + "\">")
+                if field == "Version":
+                    if self.get_previous_value(entry_identifier, field) != "":
+                        build_output("<input type=\"hidden\" " + \
+                          "name=\"field_Version\" value=\"" + \
+                          str(int(self.get_previous_value(entry_identifier, \
+                          field)) + 1) + "\">")
+                    else:
+                        build_output("<input type=\"hidden\" " + \
+                          "name=\"field_Version\" value=\"1\">")
+            else:
+                build_output("<h2 style=\"margin-bottom: 6px\">" + field + \
+                  "</h2>")
+                if field in configuration.get_single_line_entry_text_fields():
+                    build_output(get_userland_text_box( \
+                      self.get_html_name(field), \
+                      self.get_previous_value(entry_identifier, field)))
+                else:
+                    build_output(get_userland_textarea( \
+                      self.get_html_name(field), \
+                      self.get_previous_value(entry_identifier, field)))
+            build_output("</p>")
+        build_output("<p align=\"center\"><input type=\"image\" " + \
+          "name=\"submit\" value=\"submit\" " + \
+          "alt=\"submit\" border=\"0\" align=\"center\" src=\"" + \
+          configuration.convert_to_url("submit.gif") + "\">")
+        build_output("""<p align="center"><br><br>
+<input type="checkbox" name="should_delete" value="yes">
+DELETE this note.</p>""")
+        build_output("</form>")
+        build_output(configuration.get_page_footer())
+    def get_html_name(self, field):
+        return "field_" + string.replace(field, " ", "_")
+    def get_previous_value(self, entry, field):
+        entry_identifier = get_cgi("entry_identifier", "new_entry")
+        if entry_identifier == "new_entry" or get_cgi("should_delete") == \
+          "yes":
+            if field == "Text":
+                return configuration.get_default_text()
+            else:
+                return ""
+        else:
+            document = None
+            for section in sections.values():
+                if section.truename(entry_identifier) != entry_identifier:
+                    entry_identifier = section.truename(entry_identifier)
+                if section.get_preexisting_document(entry_identifier) != None:
+                    document = \
+                      section.get_preexisting_document(entry_identifier)
+            if document != None:
+                return document.get_field(field)
+            else:
+                return ""
+    def get_url(self):
+        return factory.get_frame().get_url() + \
+          "?page_mode=edit_entry&timestamp=" + str(time.time())
+
+class frame_master(frame):
+    """The master frame."""
+    def display(self):
+        build_output("<title>" + configuration.get_frame_title("master"))
+        build_output("</title>")
+        build_output(\
+          "<link rel=\"icon\" href=\"/favicon.ico\" type=\"image/x-icon\">")
+        build_output(\
+          "<link rel=\"shortcut icon\" href=\"/favicon.ico\" type=\"image/x-icon\">")
+        displayable_frames = \
+          configuration.get_internal_window_displayable_frames_list()
+        frame_widths = []
+        for current_frame in sequence(displayable_frames):
+            frame_widths.append(configuration.get_frame_width( \
+              current_frame))
+        query = ""
+        for key in get_cgi_keys():
+            if key != "page_mode":
+                query = query + "&" + key + "=" + get_cgi(key)
+        build_output("<frameset cols=\"" + string.join(frame_widths, ",") + \
+          "\" frameborder=\"0\" frameborder=\"no\" framespacing=\"0\" " + \
+          "border=\"0\">")
+        for current_frame in sequence(displayable_frames):
+            build_output("<frame src=\"" + \
+              factory.get_frame(current_frame).get_url() + query \
+              + "\" name=\"" + current_frame + "\">")
+        build_output("</frameset>")
+        build_output("<noframes>")
+        build_output("<p>")
+        for current_frame in sequence(displayable_frames):
+            build_output("<a href=\"" + \
+              factory.get_frame(current_frame).get_url() + \
+              "\">" + configuration.get_frame_title(current_frame) + \
+              "</a><br>")
+            build_output("</p>")
+        build_output("</noframes>")
+
+class furball(body):
+    """What the players are trying to catch."""
+    def __init__(self):
+        body.__init__(self)
+        mutable_master.furball = self
+
+class immutable_serializer_linker(ancestor):
+    """The master object which keeps (direct or indirect) reference to all
+    other immutable objects for serialization purposes. 'Immutable' here does
+    not mean absolutely immutable, but something that should not change in the
+    ordinary course of play: data for views comes readily to mind."""
+    highest_identifier = 0
+    def __init__(self):
+        ancestor.__init__(self)
+        self.highest_identifier = 0
+        self.views = []
+
+class map(ancestor):
+    """An object that keeps track of the location of view."""
+    def __init__(self):
+        ancestor.__init__(self)
+        self.views = []
+
+class mutable_view_wrapper(ancestor):
+    """A wrapper class which contains mutable information concerning a
+    view--material which can change from one session to another, like its
+    coordinates and location on the map."""
+    def __init__(self):
+        global mutable_master
+        ancestor.__init__(self)
+        self.neighbors = {}
+        self.view_identifier = ""
+        self.x_coordinate = 0
+        self.y_coordinate = 0
+        mutable_master.view_wrappers.append(self)
+
+class mutable_serializer_linker(ancestor):
+    """The master object which keeps (direct or indirect) reference to all
+    other mutable objects for serialization purposes."""
+    highest_identifier = 0
+    def __init__(self):
+        ancestor.__init__(self)
+        self.beginning = None
+        self.current_card = ""
+        self.current_player = None
+        self.current_player_index = 0
+        self.flags = ""
+        self.furball = None
+        self.highest_identifier = 0
+        self.map = None
+        self.players = []
+        self.view_wrappers = []
+
+class navigation(ancestor):
+    """The class responsible for handling things connected to what happens
+    when the user clicks on part of the image. This is used by the editing
+    screen to provide a list of exits."""
+    def __init__(self):
+        ancestor.__init__(self)
+        self.margin_width = .2
+        self.calculate_regions()
+    def calculate_regions(self):
+        self.regions = [ \
+          ["Left", [0, 0, self.margin_width, 1]], \
+          ["Right", [1 - self.margin_width, 0, 1, 1]], \
+          ["Forward", [self.margin_width, self.margin_width, 1 - \
+            self.margin_width, 1 - self.margin_width]], \
+          ["Back", [self.margin_width, 1 - self.margin_width, 1 - \
+            self.margin_width, 1]], \
+          ["Up", [self.margin_width, 0, 1 - self.margin_width, \
+            self.margin_width]] \
+          ]
+    def get_margin_width(self):
+        return self.margin_width
+    def get_regions(self):
+        return self.regions
+    def set_margin_width(self, margin_width):
+        self.margin_width = margin_width
+        self.calculate_regions()
+
+class player(body):
+    """A player."""
+    def __init__(self):
+        ancestor.__init__(self)
+        body.__init__(self)
+        self.name = ""
+        mutable_master.players.append(self)
+
+class view(ancestor):
+    """A view where players and the furball can be."""
+    def __init__(self):
+        ancestor.__init__(self)
+        self.values = {}
+    def delete_key(self, key):
+        if key in self.values:
+            del self.values[key]
+    def get_canonical_name(self):
+        workbench = self.get_value("full_name")
+        workbench = string.replace(workbench, " ", "_")
+        workbench = string.replace(workbench, ",", "_")
+        workbench = string.replace(workbench, "(", "_")
+        workbench = string.replace(workbench, ")", "_")
+        workbench = string.replace(workbench, "'", "")
+        workbench = string.replace(workbench, ".", "")
+        workbench = re.sub("_+", "_", workbench)
+        return workbench
+    def get_image_height(self):
+        if hasattr(self, "image_height"):
+            return self.image_height
+        else:
+            return configuration.get_image_height()
+    def get_image_width(self):
+        if hasattr(self, "image_width"):
+            return self.image_width
+        else:
+            return configuration.get_image_width()
+    def get_neighbor(self, region):
+        if self.has_key("region_" + region) and self.get_value("region_" + \
+          region) != "default":
+            #return configuration.get_view(self.get_value("region_" + region))
+            return self.get_value("region_" + region)
+        elif region == "Up" and self.has_key("region_Forward"):
+            #return configuration.get_view(self.get_value("region_Forward"))
+            return self.get_value("region_Forward")
+        if self.get_view_type() == "coordinate":
+            parsed = self.parse_name()
+            new_view_name = parsed[:]
+            direction = parsed[4]
+            if region == "Left":
+                if direction == "N":
+                    new_view_name[4] = "W"
+                elif direction == "W":
+                    new_view_name[4] = "S"
+                elif direction == "S":
+                    new_view_name[4] = "E"
+                elif direction == "E":
+                    new_view_name[4] = "N"
+            elif region == "Right":
+                if direction == "N":
+                    new_view_name[4] = "E"
+                elif direction == "E":
+                    new_view_name[4] = "S"
+                elif direction == "S":
+                    new_view_name[4] = "W"
+                elif direction == "W":
+                    new_view_name[4] = "N"
+            elif region == "Forward" or region == "Up":
+                if direction == "N":
+                    new_view_name[3] += 1
+                elif direction == "E":
+                    new_view_name[2] += 1
+                elif direction == "S":
+                    new_view_name[3] -= 1
+                elif direction == "W":
+                    new_view_name[2] -= 1
+            elif region == "Back":
+                if direction == "N":
+                    new_view_name[3] -= 1
+                elif direction == "E":
+                    new_view_name[2] -= 1
+                elif direction == "S":
+                    new_view_name[3] += 1
+                elif direction == "W":
+                    new_view_name[2] += 1
+            elif region == "Self":
+                pass
+            return configuration.look_up_view_identifier(new_view_name, \
+              self.get_identifier())
+        elif self.get_view_type() == "passage":
+            parsed = self.parse_name()
+            new_view_name = parsed[:]
+            direction = parsed[3]
+            if region == "Left" or region == "Right":
+                if direction == "F":
+                    new_view_name[3] = "B"
+                elif direction == "B":
+                    new_view_name[3] = "F"
+            elif region == "Forward" or region == "Up":
+                if direction == "F":
+                    new_view_name[2] += 1
+                elif direction == "B":
+                    new_view_name[2] -= 1
+            elif region == "Back":
+                if direction == "F":
+                    new_view_name[2] -= 1
+                elif direction == "B":
+                    new_view_name[2] += 1
+            elif region == "Self":
+                pass
+            return configuration.look_up_view_identifier(new_view_name, \
+              self.get_identifier())
+        elif self.get_view_type == "other":
+            return self.get_identifier()
+        else:
+            return self.get_identifier()
+    def get_region(self, click_x, click_y):
+        width = self.get_image_width()
+        height = self.get_image_height()
+        x = float(click_x) / float(width)
+        y = float(click_y) / float(height)
+        for region in configuration.get_navigation().get_regions():
+            if region[1][0] <= x and x <= region[1][2] and \
+              region[1][1] <= y and y <= region[1][3]:
+                return region[0]
+        return "Self"
+    def get_title(self):
+        parsed = self.parse_name()
+        if self.has_key("title"):
+            base = self.get_value("title")
+        else:
+            base = parsed[1]
+        if parsed[0] == "coordinate":
+            if parsed[2] >= 0:
+                x_coordinate = numeral(parsed[2]) + " East"
+            else:
+                x_coordinate = numeral(abs(parsed[2])) + " West"
+            if parsed[3] >= 0:
+                y_coordinate = numeral(parsed[3]) + " North"
+            else:
+                y_coordinate = numeral(abs(parsed[3])) + " South"
+            if parsed[4] == "N":
+                direction = "North"
+            elif parsed[4] == "E":
+                direction = "East"
+            elif parsed[4] == "W":
+                direction = "West"
+            elif parsed[4] == "S":
+                direction = "South"
+            else:
+                direction = "Unknown Direction"
+            return base + ": " + x_coordinate + ", " + \
+              y_coordinate + " (Facing " + direction + ")"
+        elif parsed[0] == "passage":
+            if parsed[3] == "F":
+                direction = "Forwards"
+            elif parsed[3] == "B":
+                direction = "Backwards"
+            else:
+                direction = "in Unknown Direction"
+            return base + ": Section " + numeral(parsed[2]) + " (Moving " + \
+              direction + ")"
+        elif parsed[0] == "other":
+            return base
+        else:
+            return base
+    def get_url(self):
+        if self.has_key("url"):
+            return self.get_value("url")
+        else:
+            result = []
+            result.append(configuration.get_url_prefix())
+            result.append(self.get_canonical_name())
+            result.append(configuration.get_url_suffix())
+            return "".join(result)
+    def get_value(self, key, default = ""):
+        if self.has_key(key):
+            return self.values[key]
+        else:
+            return default
+    def get_view_type(self):
+        return self.parse_name()[0]
+    def has_image_height(self):
+        return hasattr(self, "image_height")
+    def has_image_width(self):
+        return hasattr(self, "image_width")
+    def has_key(self, key):
+        return self.values.has_key(key)
+    def has_neighbor(self, direction):
+        if self.get_neighbor(direction) == self.get_identifier():
+            return 0
+        else:
+            return 1
+    def parse_name(self):
+        match = re.match("\A(.*) \(?(-?\d+)[, ]+(-?\d+)\)? (\w)\Z", \
+          self.get_value("full_name"))
+        if match != None:
+            try:
+                x = int(match.string[match.start(2):match.end(2)])
+            except ValueError:
+                x = 0
+            try:
+                y = int(match.string[match.start(3):match.end(3)])
+            except ValueError:
+                y = 0
+            return ["coordinate", \
+              match.string[match.start(1):match.end(1)], x, y, \
+              string.upper(match.string[match.start(4):match.end(4)])]
+        else:
+            match = re.match("\A(.*) (-?\d+) (\w)\Z", \
+              self.get_value("full_name"))
+            if match != None:
+                try:
+                    position = int(match.string[match.start(2):match.end(2)])
+                except ValueError:
+                    position = 0
+                return ["passage", match.string[match.start(1):match.end(1)], \
+                  position, \
+                  string.upper(match.string[match.start(3):match.end(3)])]
+            else:
+                return ["other", self.get_value("full_name")]
+    def select_view(self, x, y):
+        region = self.get_region(x, y)
+        return self.get_neighbor(region)
+    def set_from_cgi(self, cgi_key_name):
+        key_name = string.replace(cgi_key_name, "control_views_", "", 1)
+        value = get_cgi(cgi_key_name)
+        if value == "":
+            self.delete_key(key_name)
+        else:
+            self.set_value(key_name, value)
+    def set_height(self, height):
+        self.height = height
+    def set_value(self, key, value):
+        self.values[key] = value
+    def set_width(self, width):
+        self.width = width
+
+class turn_tracker(ancestor):
+    """The class that keeps track of whose turn it is."""
+    def __init__(self):
+        ancestor.__init__(self)
+        self.players = []
+        self.current_player = None
+
+# Functions.
+
+def authenticate(mode="edit"):
+    """When necessary, authenticate that the right password has been supplied
+    for priveleged operations."""
+    if mode == "create_new_view" or mode == "delete_view" or mode == "edit" \
+      or mode == "edit_view" or mode == "view_edited_view":
+        if cgi_form.has_key("password"):
+            if cgi_form["password"].value == get_password():
+                global immutable_master_may_have_changed
+                immutable_master_may_have_changed = 1
+                return 1
+            else:
+                return 0
+    elif mode == "" or mode == "default" or mode == "new_player" or \
+      mode == "play":
+        return 1
+    else:
+        return 0
+
+def authentication_failed():
+    """Print an appropriate message when authentication has failed."""
+    build_output("<input type=\"hidden\" name=\"mode\" value=\"" + \
+      get_cgi("mode") + "\">")
+    build_output("<center>")
+    build_output("<h2>Password Needed</h2>")
+    build_output("<p>Please enter the password ")
+    build_output("stored in file <tt>" + get_config_value("data_root") + \
+      "/password</tt> on the server:</p>")
+    build_output("<input type=\"password\" ")
+    build_output("name=\"password\" size=\"40\"><br>")
+    build_output("<br><input type=\"image\" name=\"submit\" ")
+    build_output("value=\"submit\" alt=\"submit\" border=\"0\" ")
+    build_output("align=\"center\" src=\"")
+    build_output(configuration.convert_to_url("submit.gif") + "\"><br><br>")
+    build_output("</center>")
+
+def build_map():
+    """Build the (mutable) map for a given game."""
+    # For each view:
+    # If it's the first, put it at (0, 0).
+    # Else:
+    #    Compile (with repetition of coordinates) a list of directions and
+    #      coordinates not taken.
+    #    Select one at random.
+    #    Place it there, make passageways to and from the parent, and
+    #      conditionally make passageways to neighbors.
+    first_view_processed = 0
+    for current_view in immutable_master.views:
+        if is_in_normal_use(current_view.identifier):
+            if first_view_processed:
+                available_slots = []
+                for current_view_wrapper in mutable_master.view_wrappers:
+                    if find_view_wrapper_at(\
+                      current_view_wrapper.x_coordinate - 1,
+                      current_view_wrapper.y_coordinate) == None:
+                        if is_true(get_config_value("more_labyrinthine_map",\
+                          "no")):
+                            if not (current_view_wrapper.x_coordinate - 1, \
+                              current_view_wrapper.y_coordinate, "east") in\
+                              available_slots:
+                                available_slots.append((\
+                                current_view_wrapper.x_coordinate - 1,\
+                                current_view_wrapper.y_coordinate, "east"))
+                        else:
+                            available_slots.append((\
+                            current_view_wrapper.x_coordinate - 1,\
+                            current_view_wrapper.y_coordinate, "east"))
+                    if find_view_wrapper_at(\
+                      current_view_wrapper.x_coordinate + 1,
+                      current_view_wrapper.y_coordinate) == None:
+                        if is_true(get_config_value("more_labyrinthine_map",\
+                          "yes")):
+                            if not (current_view_wrapper.x_coordinate + 1, \
+                              current_view_wrapper.y_coordinate, "west") in\
+                              available_slots:
+                                available_slots.append((\
+                                current_view_wrapper.x_coordinate + 1,\
+                                current_view_wrapper.y_coordinate, "west"))
+                        else:
+                            available_slots.append((\
+                            current_view_wrapper.x_coordinate + 1,\
+                            current_view_wrapper.y_coordinate, "west"))
+                    if find_view_wrapper_at(\
+                      current_view_wrapper.x_coordinate,\
+                      current_view_wrapper.y_coordinate + 1) == None:
+                        if is_true(get_config_value("more_labyrinthine_map",\
+                          "yes")):
+                            if not (current_view_wrapper.x_coordinate, \
+                              current_view_wrapper.y_coordinate + 1, "south") \
+                              in available_slots:
+                                available_slots.append((\
+                                current_view_wrapper.x_coordinate,\
+                                current_view_wrapper.y_coordinate + 1, "south"))
+                        else:
+                            available_slots.append((\
+                            current_view_wrapper.x_coordinate,\
+                            current_view_wrapper.y_coordinate + 1, "south"))
+                    if find_view_wrapper_at(\
+                      current_view_wrapper.x_coordinate,\
+                      current_view_wrapper.y_coordinate - 1) == None:
+                        if is_true(get_config_value("more_labyrinthine_map",\
+                          "yes")):
+                            if (current_view_wrapper.x_coordinate, \
+                              current_view_wrapper.y_coordinate - 1, "north") \
+                              in available_slots:
+                                available_slots.append((\
+                                current_view_wrapper.x_coordinate,\
+                                current_view_wrapper.y_coordinate - 1, "north"))
+                        else:
+                            available_slots.append((\
+                            current_view_wrapper.x_coordinate,\
+                            current_view_wrapper.y_coordinate - 1, "north"))
+                new_passage = available_slots[random_range(\
+                  len(available_slots))]
+                new_view_wrapper = mutable_view_wrapper()
+                new_view_wrapper.x_coordinate = new_passage[0]
+                new_view_wrapper.y_coordinate = new_passage[1]
+                new_view_wrapper.view_identifier = current_view.identifier
+                if new_passage[2] == "east":
+                    dig_tunnel(new_view_wrapper, find_view_wrapper_at(\
+                      new_view_wrapper.x_coordinate + 1,\
+                      new_view_wrapper.y_coordinate))
+                if new_passage[2] == "west":
+                    dig_tunnel(new_view_wrapper, find_view_wrapper_at(\
+                      new_view_wrapper.x_coordinate - 1,\
+                      new_view_wrapper.y_coordinate))
+                if new_passage[2] == "south":
+                    dig_tunnel(new_view_wrapper, find_view_wrapper_at(\
+                      new_view_wrapper.x_coordinate,\
+                      new_view_wrapper.y_coordinate - 1))
+                if new_passage[2] == "north":
+                    dig_tunnel(new_view_wrapper, find_view_wrapper_at(\
+                      new_view_wrapper.x_coordinate,\
+                      new_view_wrapper.y_coordinate + 1))
+                if find_view_wrapper_at(new_view_wrapper.x_coordinate - 1,
+                  new_view_wrapper.y_coordinate) != None:
+                    if should_dig_random_tunnel():
+                        dig_tunnel(new_view_wrapper, find_view_wrapper_at(\
+                          new_view_wrapper.x_coordinate - 1,\
+                          new_view_wrapper.y_coordinate))
+                if find_view_wrapper_at(new_view_wrapper.x_coordinate + 1,
+                  new_view_wrapper.y_coordinate) != None:
+                    if should_dig_random_tunnel():
+                        dig_tunnel(new_view_wrapper, find_view_wrapper_at(\
+                          new_view_wrapper.x_coordinate + 1,\
+                          new_view_wrapper.y_coordinate))
+                if find_view_wrapper_at(new_view_wrapper.x_coordinate,
+                  new_view_wrapper.y_coordinate - 1) != None:
+                    if should_dig_random_tunnel():
+                        dig_tunnel(new_view_wrapper, find_view_wrapper_at(\
+                          new_view_wrapper.x_coordinate,\
+                          new_view_wrapper.y_coordinate - 1))
+                if find_view_wrapper_at(new_view_wrapper.x_coordinate,
+                  new_view_wrapper.y_coordinate + 1) != None:
+                    if should_dig_random_tunnel():
+                        dig_tunnel(new_view_wrapper, find_view_wrapper_at(\
+                          new_view_wrapper.x_coordinate,\
+                          new_view_wrapper.y_coordinate + 1))
+            else:
+                new_view_wrapper = mutable_view_wrapper()
+                new_view_wrapper.x_coordinate = 0
+                new_view_wrapper.y_coordinate = 0
+                new_view_wrapper.view_identifier = current_view.identifier
+                first_view_processed = 1
+
+def build_output(text, nonewline = ""):
+    # For now does not respect the nonewline option.
+    output(text)
+
+def build_output_tabs(level, tab_list, default_tab):
+    selected_tab = default_tab
+    cgi_selected = get_cgi("selected_tab_" + str(level))
+    if get_cgi("user_selected_tab", "") != "":
+        if int(get_cgi("user_selected_level", "")) == level:
+            cgi_selected = get_cgi("user_selected_tab")
+    if cgi_selected != None:
+        for tab in sequence(tab_list):
+            if tab.get_html_value() == cgi_selected:
+                selected_tab = tab
+    build_output_tabs_open(level, tab_list, selected_tab)
+    selected_tab.display(level)
+    build_output_tabs_close(level, tab_list, selected_tab)
+
+def build_output_tabs_close(level, tab_list, selected_tab=None):
+    """Display the close for a tabbed dialogue at a given nested depth."""
+    build_output("</td></tr></table>")
+    #output("</td><td width=\"1\" background=\"" +
+      #configuration.convert_to_url("folder_border.gif") + "\"></td>")
+    #output("<td colspan=\"3\" background=\"" +
+      #configuration.convert_to_url("folder_border.gif") + "\"></td>")
+    build_output("</tr></table>")
+    build_output("</tr>")
+    build_output("</table>")
+
+def build_output_tabs_open(level, tab_list, selected_tab=None):
+    """Display the opening for a tabbed dialogue at a given nested depth."""
+    build_output("<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\">")
+    build_output("<tr><td>")
+    build_output("<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\">")
+    build_output("<tr>")
+    index = 0
+    tab_found = 0
+    tab_index = index
+    if len(tab_list) > 0:
+        for current_tab in sequence(tab_list):
+            if current_tab == selected_tab:
+                tab_found = 1
+                tab_index = index
+            build_output("<td>")
+            if index == 0:
+                if current_tab == selected_tab:
+                    if level % 2 == 0:
+                        build_output("<img src=\"" + \
+                          configuration.convert_to_url( \
+                          "leftmost_selected_even.gif") + \
+                          "\" border=\"0\" alt=\"\">")
+                    else:
+                        build_output("<img src=\"" + \
+                          configuration.convert_to_url( \
+                          "leftmost_selected_odd.gif") + \
+                          "\" border=\"0\" alt=\"\">")
+                else:
+                    build_output("<img src=\"" + \
+                      configuration.convert_to_url( \
+                      "leftmost_unselected.gif") + \
+                      "\" border=\"0\" alt=\"\">")
+            else:
+                if current_tab == selected_tab:
+                    if level % 2 == 0:
+                        build_output("<img src=\"" + \
+                          configuration.convert_to_url( \
+                          "left_selected_even.gif") + \
+                          "\" border=\"0\" alt=\"\">")
+                    else:
+                        build_output("<img src=\"" + \
+                          configuration.convert_to_url( \
+                          "left_selected_odd.gif") + \
+                          "\" border=\"0\" alt=\"\">")
+                else:
+                    if tab_found:
+                        if tab_index == index - 1:
+                            if level % 2 == 0:
+                                build_output("<img src=\"" + \
+                                  configuration.convert_to_url( \
+                                  "right_selected_even.gif") + \
+                                  "\" border=\"0\" alt=\"\">")
+                            else:
+                                build_output("<img src=\"" + \
+                                  configuration.convert_to_url( \
+                                  "right_selected_odd.gif") + \
+                                  "\" border=\"0\" alt=\"\">")
+                        else:
+                            build_output("<img src=\"" + \
+                            configuration.convert_to_url( \
+                            "right_unselected.gif") + \
+                            "\" border=\"0\" alt=\"\">")
+                    else:
+                        build_output("<img src=\"" + \
+                          configuration.convert_to_url( \
+                          "left_unselected.gif") + \
+                          "\" border=\"0\" alt=\"\">")
+            build_output("</td>")
+            if current_tab == selected_tab:
+                if level % 2 == 0:
+                    build_output("<td background=\"" + \
+                      configuration.convert_to_url( \
+                      "even_selected_background.gif") + \
+                      "\" align=\"center\" valign=\"center\"><strong>")
+                else:
+                    build_output("<td background=\"" + \
+                      configuration.convert_to_url( \
+                      "odd_selected_background.gif") + \
+                      "\" align=\"center\" valign=\"center\"><strong>")
+            else:
+                build_output("<td background=\"" + \
+                  configuration.convert_to_url( \
+                  "unselected_background.gif") + \
+                  "\" align=\"center\" valign=\"center\">")
+            if current_tab == selected_tab:
+                build_output("<input type=\"hidden\" name=\"selected_tab_" + \
+                  str(level) + "\" value=\"" + current_tab.get_html_value()  + \
+                  "\">")
+            build_output("<a href=\"JavaScript:select_tab('" + \
+              current_tab.get_html_value() + "','" + str(level) + "')\"" + \
+              " style=\"text-decoration: none\">" + \
+              current_tab.get_displayable_name() + "</a>")
+            if current_tab == selected_tab:
+                build_output("</strong>")
+            index += 1
+        build_output("</td><td>")
+        if current_tab == selected_tab:
+            if level % 2 == 0:
+                build_output("<img src=\"" + \
+                  configuration.convert_to_url( \
+                  "rightmost_selected_even.gif") + \
+                  "\" border=\"0\" alt=\"\">")
+            else:
+                build_output("<img src=\"" + \
+                  configuration.convert_to_url( \
+                  "rightmost_selected_odd.gif") + \
+                  "\" border=\"0\" alt=\"\">")
+        else:
+            build_output("<img src=\"" + \
+              configuration.convert_to_url("rightmost_unselected.gif") + \
+              "\" border=\"0\" alt=\"\">")
+        build_output("</td><td width=\"100%\" background=\"" + \
+          configuration.convert_to_url("transparent_tab_background.gif") + \
+          "\">")
+        build_output("</td></tr>")
+        build_output("<tr>")
+        build_output("<td colspan=\"" + str(index * 2 + 2) + "\">")
+        build_output( \
+          "<table border=\"0\" cellpadding=\"0\" cellspacing=\"0\"" + \
+          " width=\"100%\">")
+        build_output("<tr>")
+        #output("<td width=\"1\" background=\"" + \
+          #configuration.convert_to_url("folder_border.gif") + "\"> </td>")
+        if level % 2 == 0:
+            build_output("<td width=\"100%\" background=\"" + \
+              configuration.convert_to_url("inner_background_even.gif") + \
+              "\">")
+        else:
+            build_output("<td width=\"100%\" background=\"" + \
+              configuration.convert_to_url("inner_background_odd.gif") +\
+              "\">")
+        build_output( \
+          "<table border=\"0\" cellpadding=\"10\" cellspacing=\"0\" " + \
+          "width=\"100%\">")
+        build_output("<tr>")
+        build_output("<td width=\"100%\">")
+
+def clear_flag(current_value, flag):
+    """Clear a flag in a given text. Returns a string with the flag cleared."""
+    if test_flag(current_value, flag):
+        result = string.replace(current_value, flag, "")
+        return compress_spaces(result)
+    else:
+        return current_value
+
+def compress_spaces(text):
+    """Compress all instances of 1 or more whitespace characters in a given
+    text to one space."""
+    (result, count) = re.subn("\s+", " ", text)
+    return result
+
+def convert_to_url(name_without_path):
+    """Take the end of a path and convert to a relative or absolute URL as
+    appropriate."""
+    return configuration.convert_to_url(name_without_path)
+
+def debug_log(error_message, severity=1, should_add_timestamp = 1):
+    """Log debugging information if appropriate. The severity is 1 to 5, 1
+    being the most critical."""
+    if severity <= configuration.get_debug_level():
+        if should_add_timestamp:
+            sys.stderr.write(str(error_message) + " at " + str(time.time()) + "\n")
+        else:
+            sys.stderr.write(str(error_message) + "\n")
+
+def dig_tunnel(first_view_wrapper, second_view_wrapper):
+    """Dig a tunnel, or passageway, between two adjacent views. This only has
+    effect if the views differ by one in x coordinate, or y coordinate, but not
+    both--i.e. if they're squares that share a side on the grid."""
+    if first_view_wrapper.x_coordinate == second_view_wrapper.x_coordinate \
+      - 1 and first_view_wrapper.y_coordinate ==\
+      second_view_wrapper.y_coordinate:
+        first_view_wrapper.neighbors["east"] = second_view_wrapper
+        second_view_wrapper.neighbors["west"] = first_view_wrapper
+    if first_view_wrapper.x_coordinate == second_view_wrapper.x_coordinate \
+      + 1 and first_view_wrapper.y_coordinate ==\
+      second_view_wrapper.y_coordinate:
+        first_view_wrapper.neighbors["west"] = second_view_wrapper
+        second_view_wrapper.neighbors["east"] = first_view_wrapper
+    if first_view_wrapper.x_coordinate == second_view_wrapper.x_coordinate \
+      and first_view_wrapper.y_coordinate - 1 ==\
+      second_view_wrapper.y_coordinate:
+        first_view_wrapper.neighbors["south"] = second_view_wrapper
+        second_view_wrapper.neighbors["north"] = first_view_wrapper
+    if first_view_wrapper.x_coordinate == second_view_wrapper.x_coordinate \
+      and first_view_wrapper.y_coordinate + 1 ==\
+      second_view_wrapper.y_coordinate:
+        first_view_wrapper.neighbors["north"] = second_view_wrapper
+        second_view_wrapper.neighbors["south"] = first_view_wrapper
+
+def find_available_view_wrapper():
+    """Find a wrapper to a view that a player or (initially) the furball may be
+    placed in."""
+    available_wrappers = []
+    for current_wrapper in mutable_master.view_wrappers:
+        current_view = find_view(current_wrapper.identifier)
+        if mutable_master.furball.view_wrapper != current_wrapper and \
+          is_in_normal_use(current_view.identifier):
+            available_wrappers.append(current_wrapper)
+    if len(available_wrappers) > 0:
+        return available_wrappers[random_range(len(available_wrappers))]
+    else:
+        return None
+
+def find_ending_view():
+    """Find the wrapper to the beginning view."""
+    for candidate in immutable_master.views:
+        try:
+            if test_flag(candidate.flags, "is_ending"):
+                return candidate
+        except AttributeError:
+            pass
+    return None
+
+def find_introduction_view():
+    """Find the wrapper to the beginning view."""
+    for candidate in immutable_master.views:
+        if test_flag(candidate.flags, "is_introduction"):
+            return candidate
+    return None
+
+def find_quit_view():
+    """Find the wrapper to the quitter's view."""
+    for candidate in immutable_master.views:
+        if test_flag(candidate.flags, "is_quit"):
+            return candidate
+    return None
+
+def find_view(identifier):
+    """Find a view by either the identifier of a view or its wrapper."""
+    for candidate in immutable_master.views:
+        if candidate.identifier == identifier:
+            return candidate
+    try:
+        for candidate_wrapper in mutable_master.view_wrappers:
+            if candidate_wrapper.identifier == identifier:
+                return find_view(candidate_wrapper.view_identifier)
+    except AttributeError:
+        pass
+    return None
+
+def find_view_wrapper(identifier):
+    """Find a view wrapper by either the identifier of a wrapper or its
+    view."""
+    for candidate in mutable_master.view_wrappers:
+        if candidate.identifier == identifier or candidate.view_identifier \
+          == identifier:
+            return candidate
+    return None
+
+def find_view_wrapper_at(x_coordinate, y_coordinate):
+    for candidate in mutable_master.view_wrappers:
+        if candidate.x_coordinate == x_coordinate and \
+          candidate.y_coordinate == y_coordinate and \
+          is_in_normal_use(candidate.view_identifier):
+            return candidate
+    return None
+
+def furball_always_tries_to_move():
+    if hasattr(mutable_master, "flags"):
+        return test_flag(mutable_master.flags, "furball_always_tries_to_move")
+    else:
+        return is_true(get_config_value("furball_always_tries_to_move", "yes"))
+
+def get_absolute_path(name):
+    """Get the absolute path for a file given its relative path to the script's
+    home directory."""
+    return get_config_value("data_root",\
+      "DATA_ROOT/") + "/" + \
+      name
+
+def get_action_method():
+    """Get the action method for the main form. Should be set to "post" for
+    production purposes."""
+    return get_config_value("action_method", "post")
+
+def get_action_url():
+    """Get the action URL for the program."""
+    return configuration.get_action_url()
+
+def get_administrative_textarea(field_name, starting_text):
+    return get_textarea("administrative", field_name, starting_text)
+
+def get_administrative_text_box(field_name, starting_text, width = None):
+    return get_text_box("administrative", field_name, starting_text, width)
+
+def get_border_width():
+    """Return the thickness, in pixels, of the border for images, cards, and
+    the map."""
+    return get_config_value("border_width", "7")
+
+def get_cgi(field_name, default_value = ""):
+    # The below control structure is slightly unusual.
+    #
+    if configuration.get_program_mode() == "oracle":
+        my_cgi_form = multitasking.get_thread_specific_storage()["cgi"]
+    elif configuration.get_program_mode() == "fast_cgi":
+        return \
+          multitasking.get_thread_specific_storage()["handler"] \
+            .get(field_name, default_value)
+    else: # "standalone"
+        my_cgi_form = cgi_form
+    if my_cgi_form.has_key(field_name):
+        #return my_cgi_form[field_name].value
+        if type(my_cgi_form[field_name]) == type([]):
+            return my_cgi_form[field_name][0].value
+        else:
+            return my_cgi_form[field_name].value
+    else:
+        return default_value
+
+def get_cgi_keys_meeting_regexp(regexp = "."):
+    if configuration.get_program_mode() == "oracle":
+        my_cgi_form = multitasking.get_thread_specific_storage()["cgi"]
+    elif configuration.get_program_mode() == "fast_cgi":
+        my_cgi_form = multitasking.get_thread_specific_storage()["handler"]
+    else: # "standalone"
+        my_cgi_form = cgi_form
+    result = []
+    compiled = re.compile(regexp)
+    for key in my_cgi_form.keys():
+        if compiled.match(key):
+            result.append(key)
+    return result
+
+def get_config_filename():
+    """Get the name of the configuration_file file."""
+    return "CONFIG_FILENAME"
+
+def get_config_value(name, default=""):
+    """Get the value of a specified key from the configuration_file file. If the key is not
+    found, return the specified default."""
+    global configuration_file
+    if name == "data_root":
+        return "DATA_ROOT/"
+    elif name == "edit_password":
+        password = read_file("password")
+        password = re.sub("[\r\n]", "", password)
+        return password
+    elif configuration_file.has_option("DEFAULT", name):
+        return configuration_file.get("DEFAULT", name)
+    else:
+        return default
+
+def get_creature_name():
+    """Get the name of the creature the players are trying to catch ("The
+    Furball" by default.)"""
+    return get_config_value("creature_name", "The Furball")
+
+def get_current_view():
+    if get_cgi("view") != "":
+        old_view = configuration.get_view(get_cgi("view"))
+        if get_cgi("Left.x") != "":
+            new_view = old_view.get_neighbor("Left")
+        elif get_cgi("Right.x") != "":
+            new_view = old_view.get_neighbor("Right")
+        elif get_cgi("Forward.x") != "":
+            new_view = old_view.get_neighbor("Forward")
+        elif get_cgi("Back.x") != "":
+            new_view = old_view.get_neighbor("Back")
+        # Let clicking on center rotate the perspective clockwise.
+        elif get_cgi("Stay.x") != "":
+            #new_view = get_cgi("view")
+            new_view = old_view.get_neighbor("Right")
+        else:
+            new_view = old_view.select_view(int(get_cgi("move.x")), \
+              int(get_cgi("move.y")))
+        return new_view
+    else:
+        if configuration.get_first_view() != "":
+            return configuration.get_first_view()
+        else:
+            return None
+
+def get_htmlized_text(indent_level, text, css_class):
+    """Take text and output it, putting an HTML line break at every line break
+    between lines of text and a paragraph break at every instance of two or
+    more blank lines between text. A line of text is considered blank if it
+    contains no non-whitespace characters."""
+    text_without_carriage_returns = string.replace(text, "\r", "")
+    split_text = string.split("\n" + text_without_carriage_returns + "\n", \
+      "\n")
+    result = ""
+    current_index = 0
+    for current_line in split_text:
+        result += current_line
+        if current_index < len(split_text) - 1:
+            if re.search("^\s*$", current_line):
+                if re.search("^\s*$", split_text[current_index + 1]):
+                    result += "\n"
+                else:
+                    if css_class != "":
+                        result += "\n<p class=\"" + css_class + "\" " + \
+                          "style=\"margin-left: " + \
+                          get_indent_value(indent_level) + "; margin-right: " \
+                          + get_indent_value(indent_level) + "\">"
+                    else:
+                        result += "\n<p style=\"margin-left: " + \
+                          get_indent_value(indent_level) + "; margin-right: " \
+                          + get_indent_value(indent_level) + "\">"
+            else:
+                if re.search("^\s*$", split_text[current_index + 1]):
+                    result += "</p>\n"
+                else:
+                    result += "<br>\n"
+        current_index += 1
+    return result
+
+def get_indent_value(number_of_indents):
+    """Get the HTML CSS indent value for a given level of indentation."""
+    return str(number_of_indents) + "cm"
+
+def get_map_cell_height():
+    """Get the height of a table cell in the displayed map."""
+    return "50"
+
+def get_map_cell_width():
+    """Get the width of a table cell in the displayed map."""
+    return "50"
+
+def get_pickled_data_filename(which_file):
+    """Get the filename for pickled data."""
+    if which_file == "mutable":
+        return get_absolute_path("pickled/data.mutable." + get_visitors_ip())
+    elif which_file == "immutable":
+        return get_absolute_path("pickled/data.immutable")
+    else:
+        output_error("Tried to load invalid save file " + which_file + ".")
+        return get_absolute_path("data")
+
+def get_password():
+    """Get the password necessary to make changes."""
+    return get_config_value("edit_password", "xyzzy")
+
+def get_view_identifier():
+    return get_cgi("control_views_identifier", "new_view")
+
+def get_view_choice(selected_value, html_name = "view_identifier", \
+  should_autosubmit = 0, should_prepend_first_option = 1, \
+  first_option_identifier = "new_view"):
+    result = []
+    result.append("<select name=\"")
+    result.append(html_name)
+    result.append("\"")
+    if should_autosubmit:
+        result.append(" onclick=\"document.")
+        result.append(configuration.get_program_name())
+        result.append(".submit()\"")
+    result.append(">")
+    views_list = []
+    for view in sequence(configuration.get_views()):
+        views_list.append([view, \
+          configuration.get_views()[view].get_value("full_name")])
+    views_list = sort_by_item(views_list, 1)
+    if should_prepend_first_option:
+        result.append("<option value=\"")
+        result.append(first_option_identifier)
+        result.append("\"")
+        if selected_value == first_option_identifier:
+            result.append(" selected")
+        result.append(">")
+        if first_option_identifier == "new_view":
+            result.append("New View")
+        elif first_option_identifier == "default":
+            result.append("Default")
+        result.append("</option>")
+    for pair in views_list:
+        result.append("<option value=\"")
+        result.append(pair[0])
+        result.append("\"")
+        if pair[0] == selected_value:
+            result.append(" selected")
+        result.append(">")
+        result.append(pair[1])
+        result.append("</option>")
+    result.append("</select>")
+    return "".join(result)
+
+def get_submit_link():
+    return "<p align=\"center\"><a style=\"" + \
+      configuration.get_control_link_style() + \
+      "\" href=\"JavaScript:document." + \
+      configuration.get_program_name() + \
+      ".submit()\">Submit and Refresh</a></p>"
+
+def get_textarea(text_area_type, field_name, starting_text = ""):
+    if text_area_type == "administrative":
+        width = str(configuration.get_administrative_text_width())
+        height = str(configuration.get_administrative_text_height())
+    elif text_area_type == "userland":
+        width = str(configuration.get_userland_text_width())
+        height = str(configuration.get_userland_text_height())
+    else:
+        width = "80"
+        height = "6"
+    return "<textarea name=\"" + field_name + "\" cols=\"" + width + \
+      "\" rows=\"" + height + "\">" + str(starting_text) + "</textarea>"
+
+def get_text_box(text_area_type, field_name, starting_text = "", width = None):
+    if width == None:
+        if text_area_type == "administrative":
+            my_width = str(configuration.get_administrative_text_width())
+        elif text_area_type == "userland":
+            my_width = str(configuration.get_userland_text_width())
+        else:
+            my_width = "80"
+    else:
+        my_width = str(width)
+    return "<input type=\"text\" name=\"" + field_name + \
+      "\" size=\"" + my_width + "\" value=\"" + str(starting_text) + "\">"
+
+def get_text_width():
+    return get_config_value("text_width", "80")
+
+def get_visitors_ip():
+    """Get the visitor's IP address."""
+    return os.environ["REMOTE_ADDR"]
+
+def has_neighbor(identifier, direction, mode):
+    if (mode == "edit"):
+        return 1
+    else:
+        if direction.lower() == "self" or direction.lower() == "stay":
+            return 1
+        else:
+            if (direction.lower() == "north"):
+                if "north" in find_view_wrapper(identifier).neighbors.keys() \
+                  or "North" in find_view_wrapper(identifier).neighbors.keys():
+                    return 1
+                else:
+                    return 0
+            elif (direction.lower() == "south"):
+                if "south" in find_view_wrapper(identifier).neighbors.keys() \
+                  or "South" in find_view_wrapper(identifier).neighbors.keys():
+                    return 1
+                else:
+                    return 0
+            elif (direction.lower() == "east"):
+                if "east" in find_view_wrapper(identifier).neighbors.keys() or \
+                  "East" in find_view_wrapper(identifier).neighbors.keys():
+                    return 1
+                else:
+                    return 0
+            elif (direction.lower() == "west"):
+                if "west" in find_view_wrapper(identifier).neighbors.keys() or \
+                  "West" in find_view_wrapper(identifier).neighbors.keys():
+                    return 1
+                else:
+                    return 0
+            elif direction.lower() in \
+              find_view_wrapper(identifier).neighbors.keys():
+                return 1
+            else:
+                return 0
+
+def init():
+    """The initialization routine. Does not include the call to parse the CGI
+    input."""
+    global configuration, configuration_file, factory, game_won, \
+      mutable_data_has_been_deleted, output_in_progress
+    configuration_file = ConfigParser.ConfigParser()
+    configuration_file.read(get_config_filename())
+    game_won = 0
+    mutable_data_has_been_deleted = 0
+    output_in_progress = []
+    load_or_create_data()
+    factory = None
+    configuration = None
+    factory = factory_generator()
+    #try:
+    configuration = load_object("configuration")
+    #except IOError:
+        #configuration = factory.get_configuration_class()
+        #save_configuration()
+
+def is_in_normal_use(identifier):
+    """Is a view in normal use as a view on the map? True if the view is not
+    the introduction or ending and is not hidden."""
+    corresponding_view = find_view(identifier)
+    if corresponding_view != None:
+        if not test_flag(corresponding_view.flags, "is_ending") and \
+          not test_flag(corresponding_view.flags, "is_hidden") and \
+          not test_flag(corresponding_view.flags, "is_introduction") and \
+          not test_flag(corresponding_view.flags, "is_quit"):
+            return 1
+        else:
+            return 0
+    else:
+        return 0
+
+def is_true(option_value):
+    """Test whether a supplied string should be interpreted as true. This will
+    happen if the value, converted to lowercase, is "true", "yes", "on", or
+    "1"."""
+    if option_value.lower() == "true":
+        return 1
+    elif option_value.lower() == "yes":
+        return 1
+    elif option_value.lower() == "on":
+        return 1
+    elif option_value.lower() == "1":
+        return 1
+    else:
+        return 0
+
+def load_object(filename):
+    """Load and recover an object from a file."""
+    if re.match("^/", filename) == None:
+        my_filename = get_config_value("data_root") + "pickled/" + filename
+    else:
+        my_filename = filename
+    filehandle = open(my_filename, "rb")
+    result = cPickle.load(filehandle)
+    filehandle.close()
+    return result
+
+def load_or_create_data():
+    """Load the data if it exists; create it if it doesn't."""
+    global immutable_master, mutable_master, views
+    if os.path.exists(get_pickled_data_filename("immutable")):
+        file = open(get_pickled_data_filename("immutable"))
+        immutable_master = cPickle.load(file)
+        file.close()
+    else:
+        immutable_master = immutable_serializer_linker()
+    if os.path.exists(get_pickled_data_filename("mutable")):
+        file = open(get_pickled_data_filename("mutable"))
+        mutable_master = cPickle.load(file)
+        file.close()
+    else:
+        mutable_master = mutable_serializer_linker()
+        mutable_master.furball = furball()
+        build_map()
+        if get_config_value("furball_always_tries_to_move", "yes"):
+            mutable_master.flags = set_flag(mutable_master.flags,\
+              "furball_always_tries_to_move")
+    #try:
+        #views = load_object("views")
+    #except IOError:
+        #views = {}
+
+def next_players_turn():
+    mutable_master.current_player_index = \
+      (mutable_master.current_player_index + 1) % len(mutable_master.players)
+    mutable_master.current_player = \
+      mutable_master.players[mutable_master.current_player_index]
+    update_current_card()
+
+def numeral(number):
+    """Obtain a numeral for a given number. At present goes from 0 to 99."""
+    if number < 0:
+        return "Minus " + numeral(abs(number))
+    units = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", \
+      "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", \
+      "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"]
+    if number >= 0 and number < 100:
+        if number < 20:
+            return units[number]
+        base = ""
+        if number/10 == 2:
+            base = "Twenty"
+        if number/10 == 2:
+            base = "Thirty"
+        if number/10 == 2:
+            base = "Forty"
+        if number/10 == 2:
+            base = "Fifty"
+        if number/10 == 2:
+            base = "Sixty"
+        if number/10 == 2:
+            base = "Seventy"
+        if number/10 == 2:
+            base = "Eighty"
+        if number/10 == 2:
+            base = "Ninety"
+        if base != "":
+            if number % 10 == 0:
+                return base
+            else:
+                return base + "-" + units[number % 10]
+    return str(number)
+
+def output(text):
+    """Output a given piece of text. All output should be channeled through
+    this function."""
+    global output_in_progress
+    #print text
+    #sys.stdout.write(str(text))
+    output_in_progress.append(str(text))
+
+def output_additional_options():
+    output("<input type=\"hidden\" name=\"mode\" value=\"play\">")
+    output("<input type=\"hidden\" name=\"no_process_move\" " + \
+      "value=\"no_process_move\">")
+    output_paragraph(1, "<input type=\"radio\" name=\"change_made\" " + \
+      "value=\"new_player\"> Add a new player.")
+    output_paragraph(2, "Name or Nickname:")
+    output_paragraph(2, "<input type=\"text\" name=\"player_name\" " + \
+      "size=\"" + get_text_width() + "\">")
+    output_paragraph(2, "(Children under 13 need their parents' " + \
+      "permission to play due to the Children's Online Privacy Protection " + \
+      "Act. Here's the <a href=\"" + \
+      convert_to_url("privacy.html") + "\" target=\"blank\">privacy " + \
+      "policy</a>.)")
+    output_ruler()
+    if len(mutable_master.players) > 1:
+        output_paragraph(1, "<input type=\"radio\" name=\"change_made\" " + \
+          "value=\"delete_player\"> Delete a player.")
+        output("<p style=\"margin-left: " + get_indent_value(2) + \
+          "; margin-right: " + get_indent_value(2) + "\">")
+        players_duplicate = []
+        for current in mutable_master.players:
+            players_duplicate.append(current)
+        players_duplicate.sort(lambda x, y: cmp(x.name.lower(), \
+          y.name.lower()))
+        for current_player in players_duplicate:
+            output("<input type=\"radio\" name=\"player_to_delete\" " + \
+              "value=\"" + current_player.identifier + "\"> " + \
+              current_player.name + "<br>\n")
+        output("</p>")
+        output_ruler()
+    output_paragraph(1, "<input type=\"radio\" name=\"change_made\" " + \
+      "value=\"end_game\"> <strong>END</strong> the current game.")
+    output_ruler()
+    output_paragraph(1, "<input type=\"radio\" name=\"change_made\" " + \
+      "value=\"resume_play\" checked> Go back to playing the game.")
+    output_submit_button()
+
+def output_card():
+    if mutable_master.current_card != "":
+        output_centered_header(1, 1, "Your Card:")
+        output("<table width=\"50%\" style=\"margin-left: auto; " + \
+          "margin-right: auto\" border=\"0\"" + \
+          "cellpadding=\"0\" cellspacing=\"0\">")
+        output("<tr><td class=\"card_border\">")
+        output("<table width=\"100%\" border=\"0\" cellspacing=\"" +
+          get_border_width() + "\" " + "cellpadding=\"15\">")
+        output("<tr><td class=\"card_proper\">")
+        output(get_htmlized_text(1, "<em>" + mutable_master.current_card + \
+          "</em>", "card_text"))
+        output("</td></tr>")
+        output("</table>")
+        output("</td></tr>")
+        output("</table>\n")
+
+def output_centered_header(header_level, indent_level, text):
+    """Output a centered header of a given HTML header level, indentation
+    level, and text."""
+    output("<h" + str(header_level) + " style=\"margin-left: " + \
+      get_indent_value(indent_level) + "; margin-right: " + \
+      get_indent_value(indent_level) + "; text-align: center\">" + text + \
+        "</h" + str(header_level) + ">\n")
+
+def output_centered_paragraph(indent_level, text):
+    """Output a paragraph of a given indentation level and text."""
+    output("<p style=\"margin-left: " +\
+      get_indent_value(indent_level) + "; margin-right: " + \
+      get_indent_value(indent_level) + \
+      "; margin-top: 0cm; text-align: center\">" + text + "</p>\n")
+
+def output_checkbox(indent_level, checked, name, text):
+    result="<input type=\"checkbox\" name=\"" + name + "\" value=\"" + \
+      name + "\"" 
+    if checked:
+        result = result + " checked"
+    result = result + "> " + text
+    output_paragraph(indent_level, result)
+
+def output_default():
+    """Give the default output when a user connects."""
+    output(configuration.get_page_header())
+    view = get_current_view()
+    if view != None:
+        output_view(view)
+    else:
+        output_paragraph(1, "Welcome to this game.")
+    output(configuration.get_page_footer())
+    #if find_introduction_view() != None:
+        #output_display_view(find_introduction_view().identifier, \
+          #"introduction")
+
+def output_diagnostic(text):
+    """Output a segment of diagnostic text."""
+    output_header(1, 0, text)
+
+def output_display_view(identifier, mode):
+    """Display the contents of a given view. The mode is either "play", for
+    normal play, or "edit", for a demonstration in edit mode."""
+    view_to_display = find_view(identifier)
+    if view_to_display is not None:
+        if mode == "play":
+            output("<input type=\"hidden\" name=\"mode\" value=\"play\">")
+        if view_to_display.name != "":
+            output_centered_header(1, 0, "<em>" + view_to_display.name + \
+              "</em>")
+        if mode == "play":
+            output_centered_header(2, 0, mutable_master.current_player.name \
+              + "'s Turn")
+            if len(find_view_wrapper(identifier).neighbors.keys()) == 1:
+                output_centered_paragraph(2, "<em>To move, use the arrow " + \
+                  "at the bottom of the page.</em>")
+            else:
+                output_centered_paragraph(2, "<em>To move, use the arrows " + \
+                  "at the bottom of the page.</em>")
+        if view_to_display.image_url != "":
+            output("<table style=\"margin-left: auto; margin-right: auto\" " \
+              + " border=\"0\" cellpadding=\"0\" cellspacing=\"0\">")
+            output("<tr><td class=\"picture_border\">")
+            output("<table border=\"0\" cellspacing=\"" + \
+              get_border_width() + "\" " + "cellpadding=\"0\">")
+            output("<tr><td class=\"picture_proper\">")
+            image_text = "<img src=\"" + \
+              convert_to_url(view_to_display.image_url) + "\""
+            if view_to_display.image_width != "":
+                image_text += " width=\"" + view_to_display.image_width + "\""
+            if view_to_display.image_height != "":
+                image_text += " height=\"" + view_to_display.image_height + \
+                  "\""
+            image_text += " alt=\"\">"
+            output(image_text)
+            output("</td></tr>")
+            output("</table>")
+            output("</td></tr>")
+            output("</table>\n")
+            output("<br>")
+            if view_to_display.view_text != "":
+                output(get_htmlized_text(2, view_to_display.view_text, ""))
+            output("<br>")
+        output_card()
+        if mode == "play":
+            output("<br><br>")
+            output_map()
+            output("<br><br>")
+        if mode == "play" and is_in_normal_use(identifier):
+            output_centered_header(1, 0, "<em>Your Move:</em>")
+            output_view_navigation(identifier, mode)
+            output("<br>")
+            output("<table style=\"margin-left: auto; margin-right: " + \
+              "auto\"><tr><td>")
+            output("<input type=\"image\" " + \
+              "name=\"more_options\" value=\"more_options\" border=\"0\" " + \
+              "alt=\"More Options\" src=\"" + \
+              convert_to_url("more_options.gif") + "\">")
+            output("</td></tr></table>")
+        if test_flag(find_view(identifier).flags, "is_introduction"):
+            output("<input type=\"hidden\" name=\"mode\" " + \
+              "value=\"new_player\">")
+            output_submit_button()
+        if mode == "win":
+            output("<table style=\"margin-left: auto; margin-right: " + \
+              "auto\"><tr><td>")
+            output("<a href=\"" + get_action_url() + "\"><img src=\"" + \
+              convert_to_url("play_again.gif") + \
+              "\" border=\"0\" alt=\"Play Again\"></a>")
+            output("</td></tr></table>")
+        elif mode == "edit":
+            output("<input type=\"hidden\" name=\"view\" value=\"" + \
+              identifier + "\">")
+            output_paragraph(1, "<input type=\"radio\" name=\"mode\" " + \
+              "value=\"edit_view\" checked> Return to editing this " + \
+              "view.<br>\n")
+            output_submit_button()
+        elif mode == "quit":
+            output("<table style=\"margin-left: auto; margin-right: " + \
+              "auto\"><tr><td>")
+            output("<a href=\"" + get_action_url() + "\"><img src=\"" + \
+              convert_to_url("play_again.gif") + \
+              "\" border=\"0\" alt=\"Play Again\"></a>")
+            output("</td></tr></table>")
+    else:
+        output_error("I'm supposed to let you see a view, but I can't " + \
+        "find the view you selected.")
+
+def output_edit_introduction():
+    """Output what the player sees when trying to log in to edit."""
+    build_output("<center>")
+    build_output("<input type=\"hidden\" name=\"mode\" value=\"edit\">")
+    build_output("<h2>Password Needed</h2>")
+    build_output("<p>Please enter the password ")
+    build_output("stored in file <tt>" + get_config_value("data_root") + \
+      "/password</tt> on the server:</p>")
+    output_paragraph(1, "<input type=\"password\" name=\"password\"" + \
+      "size=\"40\">")
+    output_submit_button()
+    build_output("</center>")
+
+def output_edit_view(identifier):
+    """Display the edit menu for a given view."""
+    view_to_edit = find_view(identifier)
+    if view_to_edit is not None:
+        output("<input type=\"hidden\" name=\"view\" value=\"" + \
+          str(identifier) + "\">\n")
+        output("<input type=\"hidden\" name=\"change_made\"" + \
+          "value=\"edit_view\">\n")
+        output_header(1, 0, "Edit Place.")
+        output_header(2, 1, "Name of place:")
+        output_text_input(2, "name", view_to_edit.name)
+        output_header(2, 1, "Relative URL for image (leave empty for no image):")
+        output_text_input(2, "image_url", view_to_edit.image_url)
+        output_header(2, 1, "Width of image in pixels (if known):")
+        output_text_input(2, "image_width", view_to_edit.image_width)
+        output_header(2, 1, "Height of image in pixels (if known):")
+        output_text_input(2, "image_height", view_to_edit.image_height)
+        output_header(2, 1, "Fixed text for this view:")
+        output_paragraph(2, "This text will appear below the image (if " + \
+          "any) and above the card for a given view.")
+        output_textarea(2, 10, "view_text", view_to_edit.view_text)
+        output_header(2, 1, "Cards for this view:")
+        output_paragraph(2, "To remove a card, delete all of its text.")
+        if len(view_to_edit.cards) > 0:
+            i = 0
+            for current_card in view_to_edit.cards:
+                output_textarea(2, 3, str(i), current_card)
+                i += 1
+        else:
+            output_paragraph(2, "<em>There are no cards in this view yet.</em>")
+        output_header(2, 1, "Add a new card (if desired):")
+        output_textarea(2, 5, "new_card", "")
+        output_header(2, 1, "Is this view the introduction?")
+        output_paragraph(2, "One view is designated the introduction, " + \
+          "where players start. This value should be checked for one and " + \
+          "only one view.")
+        output_checkbox(2, test_flag(view_to_edit.flags, "is_introduction"), \
+          "is_introduction", "Yes, this is the introduction.")
+        output_header(2, 1, "Is this view the ending?")
+        output_paragraph(2, "One view is designated the ending. This value " + \
+          "should be checked for one and only one view.")
+        output_checkbox(2, test_flag(view_to_edit.flags, "is_ending"), \
+          "is_ending", "Yes, this is the end view.")
+        output_header(2, 1, "Is this view displayed when a player quits?")
+        output_paragraph(2, "One view is reserved to when a player quits. " + \
+          "This value should be checked for one and only one view.")
+        output_checkbox(2, test_flag(view_to_edit.flags, "is_quit"), \
+          "is_quit", "Yes, this is the quitter's view.")
+        output_header(2, 1, "Should this view be hidden?")
+        output_paragraph(2, "You may make a view hidden, if you like. A " + \
+          "hidden view may be edited, but will not be displayed or put on " + \
+          "the map in normal play. This is useful if you want to work on " + \
+          "a view a bit before it is available to players.")
+        output_checkbox(2, test_flag(view_to_edit.flags, "is_hidden"), \
+          "is_hidden", "Yes, this view should be hidden.")
+        output_header(2, 1, "What next?")
+        output_paragraph(1, "<input type=\"radio\" name=\"mode\" " + \
+          "value=\"edit_view\" checked> Continue editing this view.<br>\n" + \
+          "<input type=\"radio\" name=\"mode\" value=\"view_edited_view\"> " + \
+          "Visit this view.<br>\n" + \
+          "<input type=\"radio\" name=\"mode\" value=\"edit\"> " + \
+          "Return to the editing menu.")
+        output_paragraph(1, "<input type=\"radio\" name=\"mode\" " + \
+          "value=\"delete_view\"> DELETE this view.<br>\n")
+        output_submit_button()
+    else:
+        output_error("I'm supposed to let you edit a view, but I can't " + \
+        "find the view you selected.")
+
+def output_error(message):
+    """Output an error message when something has gone wrong."""
+    output("<h2>An error has occurred...</h2>\n")
+    output("<p>" + message + " (Sorry!)</p>\n")
+
+def output_form_beginning():
+    """Output the beginning of the main HTML form."""
+    output("<form method=\"" + get_action_method() + "\" action=\"" + \
+      get_action_url() + "\" name=\"" + configuration.get_program_name() + \
+      "\">\n")
+    if cgi_form.has_key("password"):
+        if cgi_form["password"].value == get_password():
+            output("<input type=\"hidden\" name=\"password\" value=\"" + \
+              cgi_form["password"].value + "\">\n")
+
+def output_form_end():
+    """Output the end of the main HTML form."""
+    output("</form>\n")
+
+def output_game_quit():
+    """Give appropriate output after the players have quit a game."""
+    if find_quit_view() != None:
+        mutable_master.current_card = ""
+        output_display_view(find_quit_view().identifier, \
+          "quit")
+    else:
+        output_paragraph(1, "Thank you for playing this game. I " + \
+          "hope you've enjoyed it; please play again sometime!")
+        output_paragraph(1, "<a href=\"http://JonathansCorner.com\" " + \
+          "target=\"_blank\">Jonathan Hayward</a>")
+        output("<table style=\"margin-left: auto; margin-right: " + \
+          "auto\"><tr><td>")
+        output("<a href=\"" + get_action_url() + \
+          "\"><img src=\"" + convert_to_url("play_again.gif") + \
+          "\" border=\"0\" alt=\"Play Again\"></a>")
+        output("</td></tr></table>")
+
+def output_header(header_level, indent_level, text):
+    """Output a header of a given HTML header level, indentation level, and
+    text."""
+    output("<h" + str(header_level) + " style=\"margin-left: " + \
+      get_indent_value(indent_level) + "; margin-right: " + \
+      get_indent_value(indent_level) + "\">" + text + "</h" + \
+      str(header_level) + ">\n")
+
+def output_main_body():
+    """Output the main contents of the body of the page, exclusive of header,
+    footer, and form beginning and ending."""
+    global new_view_identifier
+    if cgi_form.has_key("edit"):
+        output_edit_introduction()
+    elif get_cgi("change_made") == "end_game":
+        output_game_quit()
+    elif cgi_form.has_key("mode"):
+        mode = get_cgi("mode")
+        if authenticate(mode):
+            if mode == "create_new_view":
+                output_edit_view(new_view_identifier)
+            elif mode == "edit":
+                if authenticate(mode):
+                    factory.get_frame_control().display()
+            elif mode == "play":
+                if not game_won:
+                    if get_cgi("more_options.x") != "":
+                        output_additional_options()
+                    else:
+                        output_play()
+            elif mode == "view_edited_view":
+                if cgi_form.has_key("view"):
+                    output_display_view(cgi_form["view"].value, "edit")
+                else:
+                    output_error("I'm supposed to let you see a view, " + \
+                      "but I don't know which view to let you edit!")
+        else:
+            authentication_failed()
+    else:
+        remove_mutable_data()
+        mutable_master.current_card = ""
+        output_default()
+
+def output_map():
+    """Output a visible map so the players can visualize the board."""
+    highest_x_coordinate = 0
+    highest_y_coordinate = 0
+    lowest_x_coordinate = 0
+    lowest_y_coordinate = 0
+    for current_view_wrapper in mutable_master.view_wrappers:
+        if is_in_normal_use(current_view_wrapper.view_identifier):
+            if current_view_wrapper.x_coordinate > highest_x_coordinate:
+                highest_x_coordinate = current_view_wrapper.x_coordinate
+            if current_view_wrapper.y_coordinate > highest_y_coordinate:
+                highest_y_coordinate = current_view_wrapper.y_coordinate
+            if current_view_wrapper.x_coordinate < lowest_x_coordinate:
+                lowest_x_coordinate = current_view_wrapper.x_coordinate
+            if current_view_wrapper.y_coordinate < lowest_y_coordinate:
+                lowest_y_coordinate = current_view_wrapper.y_coordinate
+    output_centered_header(1, 1, "The Map:")
+    output("<table style=\"margin-left: auto; margin-right: auto\" " + \
+      "border=\"0\" cellpadding=\"0\" cellspacing=\"0\">")
+    output("<tr><td class=\"map_border\">")
+    output("<table width=\"100%\" border=\"0\" cellspacing=\"" + \
+      get_border_width() + "\" " + \
+      "cellpadding=\"15\">")
+    current_y_coordinate = highest_y_coordinate + 1
+    while current_y_coordinate >= lowest_y_coordinate - 1:
+        output("<tr>")
+        current_x_coordinate = lowest_x_coordinate - 1
+        while current_x_coordinate <= highest_x_coordinate + 1:
+            if mutable_master.current_player.view_wrapper.x_coordinate == \
+              current_x_coordinate and \
+              mutable_master.current_player.view_wrapper.y_coordinate == \
+              current_y_coordinate:
+                body_text = ""
+                if mutable_master.furball.view_wrapper.x_coordinate == \
+                  current_x_coordinate and\
+                  mutable_master.furball.view_wrapper.y_coordinate == \
+                  current_y_coordinate:
+                    if body_text != "":
+                        body_text += "<br>"
+                    body_text += "<strong>" + get_creature_name() + "</strong>"
+                player_list = players_in(find_view_wrapper_at(current_x_coordinate, \
+                  current_y_coordinate))
+                if player_list != []:
+                    for current_player in player_list:
+                        if current_player == mutable_master.current_player:
+                            if body_text != "":
+                                body_text += "<br>"
+                            body_text += "<strong>" + current_player.name + \
+                              "</strong>"
+                        else:
+                            if body_text != "":
+                                body_text += "<br>"
+                            body_text += current_player.name
+                output("<td class=\"map_current_view\" height=\"" + \
+                  get_map_cell_height() + "\" " + \
+                  "width=\"" + get_map_cell_width() + "\">" + \
+                  body_text + "&nbsp;</td>")
+            elif find_view_wrapper_at(current_x_coordinate,\
+              current_y_coordinate) != None:
+                body_text = ""
+                if mutable_master.furball.view_wrapper.x_coordinate == \
+                  current_x_coordinate and\
+                  mutable_master.furball.view_wrapper.y_coordinate == \
+                  current_y_coordinate:
+                    if body_text != "":
+                        body_text += "<br>"
+                    body_text += "<strong>" + get_creature_name() + "</strong>"
+                player_list = players_in(find_view_wrapper_at(current_x_coordinate, \
+                  current_y_coordinate))
+                if player_list != []:
+                    for current_player in player_list:
+                        if current_player == mutable_master.current_player:
+                            if body_text != "":
+                                body_text += "<br>"
+                            body_text += "<strong>" + current_player.name + \
+                              "</strong>"
+                        else:
+                            if body_text != "":
+                                body_text += "<br>"
+                            body_text += current_player.name
+                output("<td class=\"map_available_view\" height=\"" + \
+                  get_map_cell_height() + "\" " + \
+                  "width=\"" + get_map_cell_width() + "\">" + \
+                  body_text + "&nbsp;</td>")
+            else:
+                output("<td class=\"map_empty_cell\" height=\"" + \
+                  get_map_cell_height() + "\" " + "width=\"" + \
+                  get_map_cell_width() + "\">&nbsp;</td>")
+            current_x_coordinate += 1
+        output("</tr>")
+        current_y_coordinate -= 1
+    output("</table>")
+    output("</td></tr>")
+    output("</table>\n")
+
+def output_new_player():
+    """Output the form to create a new player."""
+    output("<input type=\"hidden\" name=\"mode\" value=\"new_player\">")
+    output("<input type=\"hidden\" name=\"change_made\" value=\"new_player\">")
+    if get_cgi("player_name") != "":
+        output_header(2, 1, "Add a new player. (" + get_cgi("player_name") + \
+          " has been added.)")
+    else:
+        output_header(2, 1, "Add a new player.")
+    output_header(3, 1, "Name or Nickname:")
+    output_text_input(1, "player_name", "")
+    output_checkbox(1, 0, "last_player", \
+      "This is the last player. On to the game!<br>")
+    output_submit_button()
+    output_centered_paragraph(0, "<br>(Children under 13 need their " + \
+      "parents' permission to play due to the Children's Online Privacy " + \
+      "Protection Act. Here's the <a href=\"" + \
+      convert_to_url("privacy.html") + "\" target=\"blank\">privacy " + \
+      "policy</a>.)")
+
+def output_paragraph(indent_level, text):
+    """Output a paragraph of a given indentation level and text."""
+    output("<p style=\"margin-left: " + get_indent_value(indent_level) + \
+      "; margin-right: " + get_indent_value(indent_level) + "\">" + text + \
+      "</p>\n")
+
+def output_play():
+    output_display_view(mutable_master.current_player.view_wrapper.identifier, \
+      "play")
+    
+def output_view_navigation(identifier, mode):
+    output("<table style=\"margin-left: auto; margin-right: auto\" " + \
+      "border=\"0\" cellpadding=\"0\" cellspacing=\"0\">")
+    output("<tr><td></td>")
+    if (has_neighbor(identifier, "north", mode)):
+        output("<td><input type=\"image\" name=\"north\" value=\"north\" " + \
+          "alt=\"North\" border=\"0\" src=\"" + convert_to_url("north.gif") + \
+          "\"></td>")
+    else:
+        output("<td><img border=\"0\" src=\"" + \
+          convert_to_url("north_shadow.gif") + "\"></td>")
+    output("<td></td></tr>")
+    output("<tr>")
+    if (has_neighbor(identifier, "west", mode)):
+        output("<td><input type=\"image\" name=\"west\" value=\"west\" " + \
+          "alt=\"West\" border=\"0\" src=\"" + convert_to_url("west.gif") + \
+          "\"></td>")
+    else:
+        output("<td><img border=\"0\" src=\"" + \
+          convert_to_url("west_shadow.gif") + "\"></td>")
+    if (has_neighbor(identifier, "stay", mode)):
+        output("<td><input type=\"image\" name=\"stay\" value=\"stay\" " + \
+          "alt=\"Stay Here\" border=\"0\" src=\"" + \
+          convert_to_url("stay.gif") + "\"></td>")
+    else:
+        output("<td><img border=\"0\" src=\"" + \
+          convert_to_url("stay_shadow.gif") + "\"></td>")
+    if (has_neighbor(identifier, "east", mode)):
+        output("<td><input type=\"image\" name=\"east\" value=\"east\" " + \
+          "alt=\"East\" border=\"0\" src=\"" + convert_to_url("east.gif") + \
+          "\"></td>")
+    else:
+        output("<td><img border=\"0\" src=\"" + \
+          convert_to_url("east_shadow.gif") + "\"></td>")
+    output("</tr>")
+    output("<tr><td></td>")
+    if (has_neighbor(identifier, "south", mode)):
+        output("<td><input type=\"image\" name=\"south\" value=\"south\" " + \
+          "alt=\"South\" border=\"0\" src=\"" + convert_to_url("south.gif") + \
+          "\"></td>")
+    else:
+        output("<td><img border=\"0\" src=\"" + \
+          convert_to_url("south_shadow.gif") + "\"></td>")
+    output("<td></td></tr>")
+    output("</table>\n")
+
+def output_ruler():
+    output("<hr width=\"50%\">\n")
+
+def output_submit_button():
+    output_centered_paragraph(0, "<input type=\"image\" name=\"Continue\" " + \
+      "value=\"Continue\" alt=\"Continue\" border=\"0\" src=\"" + \
+      convert_to_url("submit.gif") + "\">")
+
+def output_text_input(indentation_level, name, value):
+    """Output an HTML input of type text at a given indentation level and of a
+    given name."""
+    output("<p style=\"margin-left: " + get_indent_value(indentation_level) + \
+      "; margin-right: " + get_indent_value(indentation_level) + \
+      "\"><input type=\"text\" name=\"" + name + "\" size=\"" + \
+      get_text_width() + "\" value = \"" + value + "\"></p>\n")
+
+def output_textarea(indentation_level, height, name, value):
+    """Output an HTML textarea at a given level and of a given name and initial
+    value."""
+    output("<p style=\"margin-left: " + get_indent_value(indentation_level) + \
+      "; margin-right: " + get_indent_value(indentation_level) + \
+      "\"><textarea name=\"" + name + "\" rows=\"" + str(height) + \
+      "\" cols=\"" + get_text_width() + "\">" + \
+      cgi.escape(value) + "</textarea></p>\n")
+
+def output_view(view_identifier):
+    global output_in_progress
+    output("<br><br>")
+    output("<table align=\"center\" border=\"0\" cellpadding=\"0\" ")
+    output("cellspacing=\"0\" width=\"1\"><tr><td>")
+    output("<input type=\"hidden\" name=\"view\" value=\"")
+    output(view_identifier)
+    output("\">")
+    output("<table align=\"center\" border=\"0\" cellpadding=\"")
+    output(configuration.get_border_width())
+    output("\" cellspacing=\"0\"><tr><td bgcolor=\"black\">")
+    output("<table border=\"0\" cellpadding=\"0\" cellspacing=\"0\">")
+    output("<tr><td>")
+    output("<input type=\"image\" src=\"")
+    try:
+        view = configuration.get_view(view_identifier)
+        output(view.get_url())
+    except AttributeError, KeyError:
+        view = None
+    output("\" name=\"move\" value=\"move\" alt=\"\" border=\"0\">")
+    output("</td></tr></table></td></tr></table>")
+    output("</td></tr><tr><td>")
+    factory.get_compass().display()
+    output(configuration.get_welcome_page())
+    output_so_far = "".join(output_in_progress)
+    if view != None:
+        view_text = view.get_title()
+    else:
+        view_text = ""
+    output_so_far = string.replace(output_so_far, "@TITLE@", \
+      configuration.get_title() + ": " + view_text)
+    output_so_far = string.replace(output_so_far, "@URL@", \
+      configuration.get_action_url())
+    output_in_progress = [output_so_far]
+    output("</td></tr></table>")
+
+def place_furball_and_players():
+    mutable_master.furball.view_wrapper = find_available_view_wrapper()
+    for current_player in mutable_master.players:
+        current_player.view_wrapper = find_available_view_wrapper()
+
+def players_in(view_wrapper_in_question):
+    result = []
+    for current_player in mutable_master.players:
+        if current_player.view_wrapper == view_wrapper_in_question:
+            result.append(current_player)
+    if result != []:
+        result.sort(lambda x, y: cmp(x.name.lower(), y.name.lower()))
+    return result
+
+def process_changes():
+    """Make any changes to the program's data, before displaying the results.
+    This could include editing views, moving, ..."""
+    global immutable_master_may_have_changed, new_view_identifier
+    if get_cgi("mode") == "create_new_view":
+        new_view_identifier = view().identifier
+    elif get_cgi("mode") == "delete_view":
+        immutable_master_may_have_changed = 1
+        view_to_delete = find_view(get_cgi("view"))
+        try:
+            immutable_master.views.remove(view_to_delete)
+        except ValueError:
+            pass
+    elif get_cgi("mode") == "play":
+        if not(get_cgi("more_options.x") != "" or \
+          get_cgi("no_process_move") == "no_process_move"):
+            process_move()
+    if get_cgi("change_made") != "":
+        immutable_master_may_have_changed = 1
+        change_made = get_cgi("change_made")
+        if change_made == "delete_player":
+            index_to_delete = -1
+            players_examined = 0
+            for current_player in mutable_master.players:
+                if current_player.identifier == get_cgi("player_to_delete"):
+                    index_to_delete = players_examined
+                    player_to_delete = current_player
+                players_examined += 1
+            if index_to_delete > -1:
+                if index_to_delete < mutable_master.current_player_index:
+                    mutable_master.current_player_index -= 1
+                mutable_master.players.remove(player_to_delete)
+                mutable_master.current_player = \
+                  mutable_master.players[mutable_master.current_player_index]
+                update_current_card()
+        elif change_made == "edit_view":
+            if get_cgi("view") != "":
+                view_to_edit = find_view(get_cgi("view"))
+                if view_to_edit != None:
+                    view_to_edit.name = get_cgi("name")
+                    view_to_edit.image_url = get_cgi("image_url")
+                    view_to_edit.image_width = get_cgi("image_width")
+                    view_to_edit.image_height = get_cgi("image_height")
+                    view_to_edit.view_text = get_cgi("view_text")
+                    view_to_edit.cards = []
+                    current_card = 0
+                    more_cards = 1
+                    while more_cards:
+                        if cgi_form.has_key(str(current_card)):
+                            if get_cgi(str(current_card)) != "":
+                                view_to_edit.cards.append(get_cgi(str \
+                                  (current_card)))
+                        else:
+                            more_cards = 0
+                        current_card += 1
+                    if get_cgi("new_card") != "":
+                        view_to_edit.cards.append(get_cgi("new_card"))
+                    if get_cgi("is_ending") == "is_ending":
+                        view_to_edit.flags = set_flag(\
+                          view_to_edit.flags, "is_ending")
+                    else:
+                        view_to_edit.flags = clear_flag(\
+                          view_to_edit.flags, "is_ending")
+                    if get_cgi("is_hidden") == "is_hidden":
+                        view_to_edit.flags = set_flag(\
+                          view_to_edit.flags, "is_hidden")
+                    else:
+                        view_to_edit.flags = clear_flag(\
+                          view_to_edit.flags, "is_hidden")
+                    if get_cgi("is_introduction") == "is_introduction":
+                        view_to_edit.flags = set_flag(\
+                          view_to_edit.flags, "is_introduction")
+                    else:
+                        view_to_edit.flags = clear_flag(\
+                          view_to_edit.flags, "is_introduction")
+                    if get_cgi("is_quit") == "is_quit":
+                        view_to_edit.flags = set_flag(\
+                          view_to_edit.flags, "is_quit")
+                    else:
+                        view_to_edit.flags = clear_flag(\
+                          view_to_edit.flags, "is_quit")
+        elif change_made == "end_game":
+            remove_mutable_data()
+        elif change_made == "new_player":
+            new_player = player()
+            new_player.name = get_cgi("player_name")
+            if mutable_master.furball != None:
+                if mutable_master.furball.view_wrapper != None:
+                    new_player.view_wrapper = find_available_view_wrapper()
+        elif change_made == "resume_play":
+            pass
+        else:
+            output_error("An unrecognized type of change has been" + \
+              "attempted.  Attempting to continue if nothing had happened...")
+
+def process_move():
+    global game_won
+    if get_cgi("move").lower() != "":
+        move=get_cgi("move").lower()
+    elif get_cgi("north.x") != "":
+        move="north"
+    elif get_cgi("south.x") != "":
+        move="south"
+    elif get_cgi("east.x") != "":
+        move="east"
+    elif get_cgi("west.x") != "":
+        move="west"
+    else:
+        move="stay"
+    if mutable_master.current_player is None:
+        return
+    else:
+        old_view_wrapper = mutable_master.current_player.view_wrapper
+        if move != "stay":
+            if has_neighbor(mutable_master.current_player.view_wrapper.identifier, \
+              move, "play"):
+                if move == "north":
+                    if "north" in \
+                      mutable_master.current_player.view_wrapper.neighbors.keys():
+                        mutable_master.current_player.view_wrapper = \
+                          mutable_master.current_player.view_wrapper.neighbors["north"]
+                    elif "North" in \
+                      mutable_master.current_player.view_wrapper.neighbors.keys():
+                        mutable_master.current_player.view_wrapper = \
+                          mutable_master.current_player.view_wrapper.neighbors["North"]
+                elif move == "south":
+                    if "south" in \
+                      mutable_master.current_player.view_wrapper.neighbors.keys():
+                        mutable_master.current_player.view_wrapper = \
+                          mutable_master.current_player.view_wrapper.neighbors["south"]
+                    elif "South" in \
+                      mutable_master.current_player.view_wrapper.neighbors.keys():
+                        mutable_master.current_player.view_wrapper = \
+                          mutable_master.current_player.view_wrapper.neighbors["South"]
+                elif move == "east":
+                    if "east" in \
+                      mutable_master.current_player.view_wrapper.neighbors.keys():
+                        mutable_master.current_player.view_wrapper = \
+                          mutable_master.current_player.view_wrapper.neighbors["east"]
+                    elif "East" in \
+                      mutable_master.current_player.view_wrapper.neighbors.keys():
+                        mutable_master.current_player.view_wrapper = \
+                          mutable_master.current_player.view_wrapper.neighbors["East"]
+                elif move == "west":
+                    if "west" in \
+                      mutable_master.current_player.view_wrapper.neighbors.keys():
+                        mutable_master.current_player.view_wrapper = \
+                          mutable_master.current_player.view_wrapper.neighbors["west"]
+                    elif "West" in \
+                      mutable_master.current_player.view_wrapper.neighbors.keys():
+                        mutable_master.current_player.view_wrapper = \
+                          mutable_master.current_player.view_wrapper.neighbors["West"]
+                elif move in \
+                  mutable_master.current_player.view_wrapper.neighbors.keys():
+                    mutable_master.current_player.view_wrapper = \
+                      mutable_master.current_player.view_wrapper.neighbors[move]
+        if (move != "stay" and \
+          players_in(mutable_master.furball.view_wrapper) != []) or \
+          furball_always_tries_to_move():
+            view_wrappers_to_hide_in = []
+            for view_wrapper_direction in \
+              mutable_master.furball.view_wrapper.neighbors.keys():
+                if players_in(mutable_master.furball.view_wrapper.neighbors[view_wrapper_direction]) == [] \
+                  and mutable_master.furball.view_wrapper.neighbors[view_wrapper_direction] != old_view_wrapper:
+                    view_wrappers_to_hide_in.append(mutable_master.furball.view_wrapper.neighbors[view_wrapper_direction])
+            if len(view_wrappers_to_hide_in) > 0:
+                mutable_master.furball.view_wrapper = \
+                  view_wrappers_to_hide_in[random_range(len(view_wrappers_to_hide_in))]
+            elif players_in(mutable_master.furball.view_wrapper) != []:
+                game_won = 1
+                mutable_master.current_card = ""
+                try:
+                    output_display_view(find_ending_view().identifier, \
+                      "win")
+                except AttributeError:
+                    output_centered_paragraph(1, "You've won the game!")
+                    output("<table style=\"margin-left: auto; " + \
+                      "margin-right: auto\"><tr><td>")
+                    output("<a href=\"" + get_action_url() + \
+                      "\"><img src=\"" + \
+                      convert_to_url("play_again.gif") + \
+                      "\" border=\"0\" alt=\"Play Again\"></a>")
+                    output("</td></tr></table>")
+                remove_mutable_data()
+        next_players_turn()
+
+def random_range(range):
+    """Return a random number from 0 to range - 1."""
+    return int(random.random() * range)
+
+def read_file(name):
+    """Read the contents of a file and return it as a string."""
+    file = open(get_absolute_path(name), 'r')
+    result = file.read()
+    file.close()
+    return result
+
+def remove_mutable_data():
+    global mutable_data_has_been_deleted
+    try:
+        open(get_pickled_data_filename("mutable"), "a").close()
+    except IOError:
+        pass
+    os.remove(get_pickled_data_filename("mutable"))
+    mutable_data_has_been_deleted = 1
+
+def save_configuration():
+    maximum_attempts = 10
+    for index in range(maximum_attempts):
+        try:
+            is_error = 1
+            if THREADING_LEVEL >= 1:
+                multitasking.thread_specific_storage_lock.acquire()
+            save_object(configuration, "configuration")
+            if THREADING_LEVEL >= 1:
+                multitasking.thread_specific_storage_lock.release()
+            is_error = 0
+            return
+        except IOError:
+            if is_error:
+                time.sleep(1)
+                log_error("Failed to save configuration file, attempt " + \
+                  str(index) + ".", 2)
+    log_error("Giving up on saving configuration file after " + \
+      str(maximum_attempts) + " attempts.", 2)
+
+def save_data():
+    """Save data so it will be available for future visits."""
+    if immutable_master_may_have_changed:
+        file = open(get_pickled_data_filename("immutable") + "." + \
+          get_visitors_ip(), "w")
+        cPickle.dump(immutable_master, file)
+        file.close()
+        os.rename(get_pickled_data_filename("immutable") + "." + \
+          get_visitors_ip(), get_pickled_data_filename("immutable"))
+    if not mutable_data_has_been_deleted:
+        file = open(get_pickled_data_filename("mutable") + "." + \
+          get_visitors_ip(), "w")
+        cPickle.dump(mutable_master, file)
+        file.close()
+        os.rename(get_pickled_data_filename("mutable") + "." + \
+          get_visitors_ip(), get_pickled_data_filename("mutable"))
+
+def save_object(object, filename):
+    """Save an object to a file for later recovery."""
+    if re.match("^/", filename) == None:
+        my_filename = get_config_value("data_root") + "pickled/" + filename
+    else:
+        my_filename = filename
+    my_temporary_filename = my_filename + "_new"
+    filehandle = open(my_temporary_filename, "wb")
+    cPickle.dump(object, filehandle)
+    filehandle.close()
+    os.rename(my_temporary_filename, my_filename)
+
+def sequence(source):
+    if type(source) == type({}):
+        if CAN_SEQUENCE_OVER_DICTIONARIES:
+            return source
+        else:
+            return source.keys()
+    elif type(source) == type([]) or type(source) == type((0, 0)):
+        return source
+    else:
+        return [source]
+
+def set_flag(current_value, flag):
+    """Set a flag in a given text. Returns a string with the flag set."""
+    if (test_flag(current_value, flag)):
+        return current_value
+    else:
+        result = current_value + " " + flag
+        return compress_spaces(result)
+
+def should_dig_random_tunnel():
+    if random.random() <\
+      float(get_config_value("chance_of_tunnel_between_adjacent_views", \
+      "1.0")):
+          return 1
+    else:
+        return 0
+
+# From the Python Cookbook.
+def sort_by_attribute(data, attribute_name, in_place = 1):
+    aux = [(getattr(data[i], attribute_name), i) for i in range(len(data))]
+    return sort_helper(data, aux, in_place)
+
+def sort_by_descending_length(wordlist):
+    auxiliary = []
+    for word in wordlist:
+        auxiliary.append((word, -len(word)))
+    auxiliary = sort_by_item(auxiliary, 1)
+    result = []
+    for pair in auxiliary:
+        result.append(pair[0])
+    return result
+
+# From the Python Cookbook.
+def sort_by_item(data, item_index, in_place = 1):
+    if item_index is None:
+        if in_place:
+            data.sort()
+            result = data
+        else:
+            result = data[:]
+            result.sort()
+        return result
+    else:
+        aux = [(data[i][item_index], i) for i in range(len(data))]
+        return sort_helper(data, aux, in_place)
+
+# From the Python Cookbook.
+def sort_helper(data, aux, in_place):
+    aux.sort()
+    result = [data[i] for junk, i in aux]
+    if in_place: data[:] = result
+    return result
+
+def test_flag(current_value, flag):
+    """Test for a flag being true in a given context. Returns 1 if the flag is
+    true, 0 if it's false."""
+    if string.find(current_value, flag) != -1:
+        return 1
+    else:
+        return 0
+
+def update_current_card():
+    if mutable_master.current_player.view_wrapper != None:
+        view_to_display = \
+          find_view(mutable_master.current_player.view_wrapper.view_identifier)
+        if len(view_to_display.cards) > 0:
+            mutable_master.current_card = view_to_display.cards[\
+              random_range(len(view_to_display.cards))]
+        else:
+            mutable_master.current_card = ""
+    else:
+        mutable_master.current_card = ""
+
+# Main body
+
+if __name__ == "__main__":
+    # The following two lines must precede any creation of classes defined in
+    # this script.
+    immutable_master = None
+    immutable_master = immutable_serializer_linker()
+    immutable_master_may_have_changed = 0
+    mutable_master = None
+    mutable_master = mutable_serializer_linker()
+    init()
+    cgi_form = cgi.FieldStorage()
+    cgi_header = read_file("cgi_header")
+    page_header = read_file("page_header")
+    page_footer = read_file("page_footer")
+    output(cgi_header)
+    output("\n")
+    output(page_header)
+    process_changes()
+    output_form_beginning()
+    output_main_body()
+    output_form_end()
+    output(page_footer)
+    save_data()
+    print "".join(output_in_progress)

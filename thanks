@@ -1,0 +1,29 @@
+I would like to thank the following people for their helpfulness in writing
+Catch the Furball:
+
+Allen Downey, Jeffrey Elkner, and Chris Meyers, who wrote _How to Think Like a
+    Computer Scientist: Learning with Python_ and published it free of charge
+    on the web (http://ibiblio.org/CSpy). The book is aimed at beginners, but
+    is written so that a more experienced programmer can find out how the
+    language works fairly quickly.
+Peta Dunstan, my tutor, who helped test the script and found important bugs.
+David Marsden, who not only lent me his digital camera, but spent a couple of
+    nights fighting with uncooperative computers on my behalf, and graciously
+    provided the pictures for the Bridge, Et Cetera, and Meeting Place. (And
+    probably other things I've forgotten.)
+Mark Pilgrim, who wrote _Dive Into Python: Python for Experienced Programmers_
+    and published it free of charge on the web (http://diveintopython.org): it
+    helped me get up to writing code quickly.
+My best friend Robin Munn, who introduced me to Python, reviewed my code, and
+    discussed various language basics. (And probably other things I've
+    forgotten.)
+William Olhausen, for letting me take a photo shoot with his lovely guinea
+    pigs.
+Guido van Rossen (et al.!), for giving the world Python, and letting me
+    develop this script much more quickly than I would have expected in other
+    languages.
+Various contributors to the official python documentation
+    (http://www.python.org/doc), which let me find a lot of reference answers
+    quickly.
+Marcus Williams, who told me what I needed to do to fix a bug that left the
+    script somewhat non-functional to visitors using IE.

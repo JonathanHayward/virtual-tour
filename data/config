@@ -1,0 +1,14 @@
+[DEFAULT]
+
+# Whether the form's action is post or get. Must be post or get.
+action_method=get
+
+# The form's action URL.
+action_url=/cgi-bin/labyrinth
+
+# The root directory used for data: this file, pickled data, etc.
+data_root=DATA_ROOT
+
+# The base URL for documents referenced by the script. It is preferable not to
+# include the initial http://hostname portion.
+document_url=DOCUMENT_URL
